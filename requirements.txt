@@ -1,0 +1,4 @@
+numpy
+pymupdf
+python-docx
+streamlit

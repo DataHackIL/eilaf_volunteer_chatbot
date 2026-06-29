@@ -1,0 +1,35 @@
+# Hidden folders
+.claude/
+.venv/
+.env/
+.idea/
+.vscode/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.ipynb_checkpoints/
+.cache/
+.tox/
+.DS_Store
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+build/
+dist/
+*.egg-info/
+*.egg
+
+# Environment / secrets
+.env
+*.local
+
+# Logs
+*.log
+
+# Local knowledge store (data files kept out of git)
+data/static/*.docx
+data/static/*.pdf
+data/static/*.txt

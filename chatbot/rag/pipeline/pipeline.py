@@ -17,8 +17,8 @@ from pathlib import Path
 import numpy as np
 
 from chatbot.rag.documents import Document, load_documents
-from chatbot.rag.embedder import Embedder, RandomEmbedder
-from chatbot.rag.generator import Generator, RandomPassagesGenerator
+from chatbot.rag.embedder import Embedder, SentenceTransformerEmbedder
+from chatbot.rag.generator import ContextEchoGenerator, Generator
 
 # repo_root/data/static  (this file is chatbot/rag/pipeline/pipeline.py)
 DEFAULT_STATIC_DIR = Path(__file__).resolve().parents[3] / "data" / "static"
@@ -46,11 +46,16 @@ class RAGPipeline:
     def from_static_dir(
         cls, static_dir: str | Path = DEFAULT_STATIC_DIR, **kwargs
     ) -> "RAGPipeline":
-        """Build a pipeline with placeholder components from files on disk."""
+        """Build a pipeline from files on disk using the pretrained embedder.
+
+        Retrieves the nearest-neighbour passages to the query and echoes them.
+        Swap in ``RandomEmbedder`` / ``RandomPassagesGenerator`` for a no-download
+        smoke test, or a real LLM generator once a provider is chosen.
+        """
         return cls(
             documents=load_documents(static_dir),
-            embedder=RandomEmbedder(),
-            generator=RandomPassagesGenerator(n=5),
+            embedder=SentenceTransformerEmbedder(),
+            generator=ContextEchoGenerator(),
             **kwargs,
         )
 

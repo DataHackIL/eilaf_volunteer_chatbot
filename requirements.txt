@@ -1,4 +1,5 @@
 numpy
 pymupdf
 python-docx
+sentence-transformers
 streamlit

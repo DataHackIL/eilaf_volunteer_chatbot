@@ -33,3 +33,4 @@ dist/
 data/static/*.docx
 data/static/*.pdf
 data/static/*.txt
+data/static/*.json

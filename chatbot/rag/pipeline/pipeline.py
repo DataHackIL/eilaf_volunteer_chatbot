@@ -81,11 +81,9 @@ def _main() -> None:
     pipeline = RAGPipeline.from_static_dir()
     if not pipeline.documents:
         print(f"No documents found in {DEFAULT_STATIC_DIR}", file=sys.stderr)
-    for line in sys.stdin:
-        query = line.strip()
-        if not query:
-            continue
-        print(pipeline.answer(query))
+    line = input("Please enter a query (or Ctrl+C to exit):\n")
+    query = line.strip()
+    print(pipeline.answer(query))
 
 
 if __name__ == "__main__":

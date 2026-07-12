@@ -3,3 +3,5 @@ pymupdf
 python-docx
 sentence-transformers
 streamlit
+beautifulsoup4
+lxml

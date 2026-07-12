@@ -13,6 +13,8 @@ from collections.abc import Sequence
 import numpy as np
 
 from chatbot.rag.embedder.base import Embedder
+from sentence_transformers import SentenceTransformer
+
 
 DEFAULT_MODEL = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
 
@@ -21,7 +23,6 @@ class SentenceTransformerEmbedder(Embedder):
     def __init__(self, model_name: str = DEFAULT_MODEL, device: str | None = None):
         # Imported lazily: keeps the heavy torch/transformers import off the
         # path of code that only needs the lightweight RandomEmbedder.
-        from sentence_transformers import SentenceTransformer
 
         self.model_name = model_name
         self._model = SentenceTransformer(model_name, device=device)

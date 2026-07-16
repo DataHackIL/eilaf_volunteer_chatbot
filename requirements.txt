@@ -3,6 +3,7 @@ pymupdf
 python-docx
 sentence-transformers
 torchvision
-streamlit
+streamlit>=1.40
 beautifulsoup4
 lxml
+faster-whisper

@@ -10,7 +10,7 @@ Files in ``data/static/`` are read and returned as :class:`Document` objects:
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import fitz  # PyMuPDF — better Hebrew/RTL extraction than pypdf
@@ -22,10 +22,17 @@ _CRUMB = " › "
 
 @dataclass
 class Document:
-    """A single chunk of text plus where it came from."""
+    """A single chunk of text plus where it came from.
+
+    ``meta`` holds closed-form eligibility tags used by the metadata filter
+    (``type``/``area`` today; ``min_age``/``max_age``/``gender``/``locality``
+    once the deferred extraction pass fills them). A missing key means NaN —
+    unconstrained — and never causes the chunk to be filtered out.
+    """
 
     text: str
     source: str = ""
+    meta: dict = field(default_factory=dict)
 
 
 def _read_pdf(path: Path) -> str:
@@ -60,6 +67,27 @@ def _chunk(text: str, max_chars: int) -> list[str]:
     return chunks
 
 
+def _root_meta(data: dict) -> dict:
+    """Seed metadata from the tree's structured root fields (kolzchut only)."""
+    meta = {}
+    for key in ("type", "area"):
+        value = (data.get(key) or "").strip()
+        if value:
+            meta[key] = value
+    return meta
+
+
+def _node_meta(node: dict, parent_meta: dict) -> dict:
+    """Metadata for one node, inheriting its parent's tags.
+
+    This is the insertion point for the deferred filter-value extraction pass:
+    age/gender/locality live in Hebrew prose (``node["text"]``), not structured
+    fields, so a later scraping pass will parse them out and *override* the
+    inherited tags here. Until then a node simply inherits its parent's meta.
+    """
+    return dict(parent_meta)
+
+
 def _flatten_json_tree(data: dict, source: str) -> list[Document]:
     """Flatten a scraper section-tree into heading-prefixed Documents.
 
@@ -67,33 +95,40 @@ def _flatten_json_tree(data: dict, source: str) -> list[Document]:
     kolzchut nodes a ``heading``; both nest via a recursive ``children`` list
     and hold body text in ``text``. Each text-bearing node becomes one Document
     whose text is prefixed with its ancestor breadcrumb, so an isolated chunk
-    still says which right / section it belongs to.
+    still says which right / section it belongs to. Metadata flows root → child
+    (children inherit, then override) so a chunk carries its eligibility tags.
     """
     title = data.get("title", "")
     documents: list[Document] = []
+    root_meta = _root_meta(data)
 
     def label(node: dict) -> str:
         parts = (node.get("marker", ""), node.get("heading", ""))
         return " ".join(part for part in parts if part).strip()
 
-    def emit(text: str, crumbs: list[str]) -> None:
+    def emit(text: str, crumbs: list[str], meta: dict) -> None:
         text = (text or "").strip()
         if not text:
             return
         prefix = _CRUMB.join(crumb for crumb in crumbs if crumb)
         documents.append(
-            Document(text=f"{prefix}\n{text}" if prefix else text, source=source)
+            Document(
+                text=f"{prefix}\n{text}" if prefix else text,
+                source=source,
+                meta=dict(meta),
+            )
         )
 
-    emit(data.get("lead", ""), [title])  # kolzchut intro paragraph
+    emit(data.get("lead", ""), [title], root_meta)  # kolzchut intro paragraph
 
-    def walk(nodes: list, crumbs: list[str]) -> None:
+    def walk(nodes: list, crumbs: list[str], meta: dict) -> None:
         for node in nodes:
             child_crumbs = crumbs + [label(node)]
-            emit(node.get("text", ""), child_crumbs)
-            walk(node.get("children", []), child_crumbs)
+            node_meta = _node_meta(node, meta)
+            emit(node.get("text", ""), child_crumbs, node_meta)
+            walk(node.get("children", []), child_crumbs, node_meta)
 
-    walk(data.get("children", []), [title])
+    walk(data.get("children", []), [title], root_meta)
     return documents
 
 

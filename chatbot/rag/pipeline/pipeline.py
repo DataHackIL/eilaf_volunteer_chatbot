@@ -18,6 +18,7 @@ import numpy as np
 
 from chatbot.rag.documents import Document, load_documents
 from chatbot.rag.embedder import Embedder, SentenceTransformerEmbedder
+from chatbot.rag.filters import MetadataFilter, SoftMetadataFilter
 from chatbot.rag.generator import ContextEchoGenerator, Generator
 
 # repo_root/data/static  (this file is chatbot/rag/pipeline/pipeline.py)
@@ -30,11 +31,13 @@ class RAGPipeline:
         documents: Sequence[Document],
         embedder: Embedder,
         generator: Generator,
+        metadata_filter: MetadataFilter | None = None,
         top_k: int = 5,
     ):
         self.documents = list(documents)
         self.embedder = embedder
         self.generator = generator
+        self.metadata_filter = metadata_filter or SoftMetadataFilter()
         self.top_k = top_k
         self._embeddings = (
             self.embedder.encode([d.text for d in self.documents])
@@ -59,16 +62,24 @@ class RAGPipeline:
             **kwargs,
         )
 
-    def retrieve(self, query: str) -> list[Document]:
+    def retrieve(self, query: str, facts: dict | None = None) -> list[Document]:
+        """Retrieve the top-k chunks, optionally re-scored by closed-form facts.
+
+        ``facts`` maps answered fields (``age``/``gender``/``locality``) to
+        their values; omitted fields don't constrain anything. See
+        :class:`~chatbot.rag.filters.MetadataFilter`.
+        """
         if not self.documents:
             return []
         query_vec = self.embedder.encode([query])[0]
         sims = self._cosine(self._embeddings, query_vec)
+        if facts:
+            sims = sims + self.metadata_filter.adjust(self.documents, facts)
         top_idx = np.argsort(-sims)[: self.top_k]
         return [self.documents[i] for i in top_idx]
 
-    def answer(self, query: str) -> str:
-        return self.generator.generate(query, self.retrieve(query))
+    def answer(self, query: str, facts: dict | None = None) -> str:
+        return self.generator.generate(query, self.retrieve(query, facts))
 
     @staticmethod
     def _cosine(matrix: np.ndarray, vector: np.ndarray) -> np.ndarray:

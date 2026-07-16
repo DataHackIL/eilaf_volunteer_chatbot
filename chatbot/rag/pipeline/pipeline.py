@@ -20,6 +20,7 @@ from chatbot.rag.documents import Document, load_documents
 from chatbot.rag.embedder import Embedder, SentenceTransformerEmbedder
 from chatbot.rag.filters import MetadataFilter, SoftMetadataFilter
 from chatbot.rag.generator import ContextEchoGenerator, Generator
+from chatbot.rag.pipeline.embedding_cache import load_or_encode
 
 # repo_root/data/static  (this file is chatbot/rag/pipeline/pipeline.py)
 DEFAULT_STATIC_DIR = Path(__file__).resolve().parents[3] / "data" / "static"
@@ -33,17 +34,27 @@ class RAGPipeline:
         generator: Generator,
         metadata_filter: MetadataFilter | None = None,
         top_k: int = 5,
+        cache_dir: str | Path | None = None,
     ):
         self.documents = list(documents)
         self.embedder = embedder
         self.generator = generator
         self.metadata_filter = metadata_filter or SoftMetadataFilter()
         self.top_k = top_k
-        self._embeddings = (
-            self.embedder.encode([d.text for d in self.documents])
-            if self.documents
-            else np.zeros((0, 1), dtype=np.float32)
-        )
+        self._embeddings = self._embed(cache_dir)
+
+    def _embed(self, cache_dir: str | Path | None) -> np.ndarray:
+        """Embed the corpus, via the on-disk cache when ``cache_dir`` is set.
+
+        The cache turns the (minutes-long, CPU-bound) corpus embedding into a
+        one-time cost; see :mod:`chatbot.rag.pipeline.embedding_cache`.
+        """
+        texts = [d.text for d in self.documents]
+        if not texts:
+            return np.zeros((0, 1), dtype=np.float32)
+        if cache_dir is not None:
+            return load_or_encode(self.embedder, texts, cache_dir)
+        return self.embedder.encode(texts)
 
     @classmethod
     def from_static_dir(
@@ -59,6 +70,10 @@ class RAGPipeline:
             documents=load_documents(static_dir),
             embedder=SentenceTransformerEmbedder(),
             generator=ContextEchoGenerator(),
+            # Persist embeddings in a subdir (not matched by the loader's
+            # top-level *.json/*.docx/... globs), so startup pays the encode
+            # cost once instead of on every launch.
+            cache_dir=Path(static_dir) / ".embeddings",
             **kwargs,
         )
 

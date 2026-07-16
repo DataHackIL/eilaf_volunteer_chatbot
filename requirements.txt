@@ -2,6 +2,7 @@ numpy
 pymupdf
 python-docx
 sentence-transformers
+torchvision
 streamlit
 beautifulsoup4
 lxml

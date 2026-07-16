@@ -9,6 +9,7 @@ interface. Swap ``model_name`` for a stronger model later (e.g. e5, which needs
 from __future__ import annotations
 
 from collections.abc import Sequence
+from pathlib import Path
 
 import numpy as np
 
@@ -26,6 +27,20 @@ class SentenceTransformerEmbedder(Embedder):
 
         self.model_name = model_name
         self._model = SentenceTransformer(model_name, device=device)
+
+    @property
+    def fingerprint(self) -> str:
+        # For a frozen HF model the name pins the weights. A local checkpoint
+        # (e.g. a finetuned model) may keep the same path across finetunes, so
+        # fold in its newest file mtime to catch an in-place overwrite that
+        # leaves the name unchanged — otherwise stale embeddings get reused.
+        parts = [type(self).__qualname__, self.model_name]
+        local = Path(self.model_name)
+        if local.exists():
+            mtimes = [p.stat().st_mtime for p in local.rglob("*") if p.is_file()]
+            if mtimes:
+                parts.append(f"mtime={max(mtimes):.0f}")
+        return ":".join(parts)
 
     def encode(self, texts: Sequence[str]) -> np.ndarray:
         return self._model.encode(

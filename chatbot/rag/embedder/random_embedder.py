@@ -19,6 +19,10 @@ class RandomEmbedder(Embedder):
         self.dim = dim
         self.seed = seed
 
+    @property
+    def fingerprint(self) -> str:
+        return f"{type(self).__qualname__}:dim={self.dim}:seed={self.seed}"
+
     def _vector_seed(self, text: str) -> int:
         digest = hashlib.sha256(f"{self.seed}:{text}".encode()).digest()
         return int.from_bytes(digest[:8], "big")

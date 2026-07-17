@@ -22,6 +22,7 @@ dependencies = [
     "streamlit",
     # speech-to-text
     "faster-whisper",
+    "google-genai>=2.12.1",
 ]
 
 [build-system]

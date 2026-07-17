@@ -4,8 +4,11 @@ Reads ``data/static/raw/*.json``, writes annotated copies to
 ``data/static/enriched/`` (raw is never touched), reusing the previous enriched
 copy so re-runs only bill Claude for new/changed segments.
 
-Cost control (Batches has no built-in spend cap):
+Modes / cost control (Batches has no built-in spend cap):
   --dry-run     report how many segments would be sent to Claude; call nothing.
+  --no-claude   rules-only pass: drop obvious junk, leave the rest untagged, and
+                write every file — no API key needed. The deferred segments get
+                tagged on a later full run.
   --limit N     send at most N new segments to Claude this run; defer the rest
                 (a later run picks them up), so you can enrich within a budget.
 """
@@ -28,6 +31,11 @@ def main() -> None:
         help="report how many segments would be sent to Claude; do not call it or write.",
     )
     parser.add_argument(
+        "--no-claude",
+        action="store_true",
+        help="rules-only pass: drop obvious junk, leave the rest untagged, write all files.",
+    )
+    parser.add_argument(
         "--limit",
         type=int,
         default=None,
@@ -36,7 +44,11 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    if not args.dry_run:
+    # A non-positive limit means "send nothing to Claude" — same as --no-claude.
+    no_claude = args.no_claude or (args.limit is not None and args.limit <= 0)
+    needs_claude = not (args.dry_run or no_claude)
+
+    if needs_claude:
         try:
             from dotenv import load_dotenv
 
@@ -53,7 +65,8 @@ def main() -> None:
 
     enriched_dir.mkdir(parents=True, exist_ok=True)
     enricher = ClaudeSegmentEnricher()
-    remaining = args.limit
+    # Only a positive limit drives the stop-early budget; dry-run/no-claude send 0.
+    remaining = None if not needs_claude else args.limit
     total_pending = 0
 
     for raw_path in raw_files:
@@ -65,7 +78,7 @@ def main() -> None:
             else None
         )
 
-        max_new = 0 if args.dry_run else remaining
+        max_new = remaining if needs_claude else 0
         tree, n_pending, billed = annotate_tree(
             raw_tree, enricher, existing, max_new=max_new
         )
@@ -79,11 +92,17 @@ def main() -> None:
             json.dumps(tree, ensure_ascii=False, indent=2), encoding="utf-8"
         )
         deferred = n_pending - billed
-        print(
-            f"{raw_path.name}: enriched ({billed} sent to Claude"
-            + (f", {deferred} deferred" if deferred else "")
-            + ")"
-        )
+        if no_claude:
+            print(
+                f"{raw_path.name}: rules-only "
+                f"({deferred} segments deferred to a future Claude run)"
+            )
+        else:
+            print(
+                f"{raw_path.name}: enriched ({billed} sent to Claude"
+                + (f", {deferred} deferred" if deferred else "")
+                + ")"
+            )
         if remaining is not None:
             remaining -= billed
             if remaining <= 0:

@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+
+# Build / packaging
+build/
+dist/
+*.whl
+*.tar.gz
+
+# Environments
+.venv/
+venv/
+eilaf/
+
+# uv
+.uv/
+
+# Caches / local data
+*.embeddings/
+.embeddings/
+.vscode/

@@ -8,17 +8,11 @@ Run from the repo root::
     streamlit run app/visualizer/streamlit_app.py
 """
 
-import sys
-from pathlib import Path
+import streamlit as st
 
-# Make the repo root importable when launched via `streamlit run`.
-sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-
-import streamlit as st  # noqa: E402
-
-from app.localities import load_localities  # noqa: E402
-from app.visualizer.i18n import TEXTS, Language  # noqa: E402
-from chatbot.rag.pipeline import RAGPipeline  # noqa: E402
+from app.localities import load_localities
+from app.visualizer.i18n import TEXTS, Language
+from chatbot.rag.pipeline import RAGPipeline
 
 # `set_page_config` must be the first Streamlit call, so read the language the
 # user previously picked from session state (defaulting to Hebrew) before the

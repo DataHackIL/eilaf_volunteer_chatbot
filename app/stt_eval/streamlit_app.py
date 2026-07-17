@@ -4,23 +4,20 @@ Record a prompt from the microphone, eyeball its waveform for a sanity check,
 and read back the transcription. The language switch selects the backend model:
 Hebrew uses ivrit.ai's Whisper large-v3-turbo, Arabic uses Whisper large-v3.
 
-Run from the repo root::
+Run from the repo root (``PYTHONPATH=.`` makes the project packages importable
+under ``streamlit run``, which otherwise only puts this file's directory on the
+path)::
 
-    streamlit run app/stt_eval/streamlit_app.py
+    PYTHONPATH=. streamlit run app/stt_eval/streamlit_app.py
 """
 
 import io
-import sys
-from pathlib import Path
 
-# Make the repo root importable when launched via `streamlit run`.
-sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+import numpy as np
+import streamlit as st
 
-import numpy as np  # noqa: E402
-import streamlit as st  # noqa: E402
-
-from app.visualizer.i18n import Language  # noqa: E402
-from transcription import (  # noqa: E402
+from app.visualizer.i18n import Language
+from transcription import (
     IvritHebrewTranscriber,
     Transcriber,
     WhisperArabicTranscriber,

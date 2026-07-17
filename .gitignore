@@ -29,11 +29,11 @@ dist/
 # Logs
 *.log
 
-# Local knowledge store (data files kept out of git)
-data/static/*.docx
-data/static/*.pdf
-data/static/*.txt
-data/static/*.json
+# Local knowledge store (data files kept out of git) — raw/ and enriched/ subdirs
+data/static/**/*.docx
+data/static/**/*.pdf
+data/static/**/*.txt
+data/static/**/*.json
 
 # Cached corpus embeddings (regenerated on demand)
-data/static/.embeddings/
+data/static/**/.embeddings/

@@ -13,6 +13,11 @@ dependencies = [
     # rag
     "numpy",
     "sentence-transformers",
+    # enrichment / LLM (Claude via the official SDK; pydantic for the
+    # structured-output schema; dotenv loads the API key from a local .env)
+    "anthropic",
+    "pydantic",
+    "python-dotenv",
     # apps
     "streamlit",
     # speech-to-text

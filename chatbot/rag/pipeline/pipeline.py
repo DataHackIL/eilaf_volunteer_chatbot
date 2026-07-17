@@ -23,7 +23,12 @@ from chatbot.rag.generator import ContextEchoGenerator, Generator
 from chatbot.rag.pipeline.embedding_cache import load_or_encode
 
 # repo_root/data/static  (this file is chatbot/rag/pipeline/pipeline.py)
-DEFAULT_STATIC_DIR = Path(__file__).resolve().parents[3] / "data" / "static"
+_STATIC_DIR = Path(__file__).resolve().parents[3] / "data" / "static"
+# The static store is split in two: scrapers write raw section-trees to ``raw/``;
+# the enrich stage (``data/enrich``) reads ``raw/`` and writes annotated copies to
+# ``enriched/`` — which is what the RAG pipeline actually reads.
+RAW_STATIC_DIR = _STATIC_DIR / "raw"
+DEFAULT_STATIC_DIR = _STATIC_DIR / "enriched"
 
 
 class RAGPipeline:

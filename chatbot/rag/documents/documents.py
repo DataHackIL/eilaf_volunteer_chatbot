@@ -1,6 +1,7 @@
 """Load the static knowledge store into text chunks.
 
-Files in ``data/static/`` are read and returned as :class:`Document` objects:
+Files in the enriched store (``data/static/enriched/``) are read and returned as
+:class:`Document` objects:
 - ``.json`` → a scraper section-tree (nevo/kolzchut): one Document per
   text-bearing node, prefixed with its heading breadcrumb for context.
 - ``.docx`` → one Document per non-empty paragraph (a "phrase").
@@ -68,9 +69,15 @@ def _chunk(text: str, max_chars: int) -> list[str]:
 
 
 def _root_meta(data: dict) -> dict:
-    """Seed metadata from the tree's structured root fields (kolzchut only)."""
+    """Seed metadata from the tree's structured root fields.
+
+    ``type``/``area`` come from the scrapers (kolzchut). ``locality`` is a
+    dataset-level tag: national sources omit it (unconstrained); a municipal
+    dataset sets it once on the root and it inherits down to every segment via
+    :func:`_node_meta`, so the metadata filter can restrict it to that locality.
+    """
     meta = {}
-    for key in ("type", "area"):
+    for key in ("type", "area", "locality"):
         value = (data.get(key) or "").strip()
         if value:
             meta[key] = value
@@ -78,14 +85,18 @@ def _root_meta(data: dict) -> dict:
 
 
 def _node_meta(node: dict, parent_meta: dict) -> dict:
-    """Metadata for one node, inheriting its parent's tags.
+    """Metadata for one node: the parent's tags, overridden by the node's own.
 
-    This is the insertion point for the deferred filter-value extraction pass:
-    age/gender/locality live in Hebrew prose (``node["text"]``), not structured
-    fields, so a later scraping pass will parse them out and *override* the
-    inherited tags here. Until then a node simply inherits its parent's meta.
+    The enrich stage (``data/enrich``) parses age/gender/locality out of the
+    Hebrew prose and stores them under ``node["meta"]``; here they override the
+    inherited parent tags. Un-enriched nodes carry no ``meta`` and simply inherit
+    the parent's — so the loader still works on a raw (un-enriched) tree.
     """
-    return dict(parent_meta)
+    meta = dict(parent_meta)
+    node_meta = node.get("meta")
+    if isinstance(node_meta, dict):
+        meta.update({key: value for key, value in node_meta.items() if value is not None})
+    return meta
 
 
 def _flatten_json_tree(data: dict, source: str) -> list[Document]:
@@ -125,7 +136,10 @@ def _flatten_json_tree(data: dict, source: str) -> list[Document]:
         for node in nodes:
             child_crumbs = crumbs + [label(node)]
             node_meta = _node_meta(node, meta)
-            emit(node.get("text", ""), child_crumbs, node_meta)
+            # Skip segments the enrich stage judged useless (headers, stubs,
+            # meaningless lines); a missing flag (un-enriched) keeps the node.
+            if node.get("useful", True):
+                emit(node.get("text", ""), child_crumbs, node_meta)
             walk(node.get("children", []), child_crumbs, node_meta)
 
     walk(data.get("children", []), [title], root_meta)

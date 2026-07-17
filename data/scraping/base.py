@@ -1,11 +1,11 @@
 import os
 from pathlib import Path
 
-from chatbot.rag.pipeline.pipeline import DEFAULT_STATIC_DIR
+from chatbot.rag.pipeline.pipeline import RAW_STATIC_DIR
 
 
 class BaseScraper:
-    def __init__(self, target_url: str, static_dir: os.PathLike = DEFAULT_STATIC_DIR):
+    def __init__(self, target_url: str, static_dir: os.PathLike = RAW_STATIC_DIR):
         self.target_url = target_url
         self.static_dir = Path(static_dir)
         self._extension = 'txt'

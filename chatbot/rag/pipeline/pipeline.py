@@ -46,6 +46,9 @@ class RAGPipeline:
         self.generator = generator
         self.metadata_filter = metadata_filter or SoftMetadataFilter()
         self.top_k = top_k
+        # Index by id so retrieval can reattach a matched node's parent. Ids are
+        # unique per corpus; a heading-only parent simply isn't in the map.
+        self._by_id = {d.id: d for d in self.documents if d.id}
         self._embeddings = self._embed(cache_dir)
 
     def _embed(self, cache_dir: str | Path | None) -> np.ndarray:
@@ -83,11 +86,20 @@ class RAGPipeline:
         )
 
     def retrieve(self, query: str, facts: dict | None = None) -> list[Document]:
-        """Retrieve the top-k chunks, optionally re-scored by closed-form facts.
+        """Retrieve the top-k chunks, each followed by its immediate parent.
+
+        Scoring and top-k selection are unchanged; after selecting the matches,
+        each one's immediate parent section (from the source tree) is appended as
+        extra context so a matched clause carries its parent's framing prose.
+        Parents are looked up by ``parent_id`` and deduped by id, so siblings
+        sharing a parent add it once and a match that is another match's parent
+        is never doubled. A heading-only parent that never became a Document
+        simply doesn't resolve. Result size is at most ~2×``top_k``.
 
         ``facts`` maps answered fields (``age``/``gender``/``locality``) to
         their values; omitted fields don't constrain anything. See
-        :class:`~chatbot.rag.filters.MetadataFilter`.
+        :class:`~chatbot.rag.filters.MetadataFilter`. Note that appended parents
+        are not themselves re-scored or metadata-filtered.
         """
         if not self.documents:
             return []
@@ -96,7 +108,25 @@ class RAGPipeline:
         if facts:
             sims = sims + self.metadata_filter.adjust(self.documents, facts)
         top_idx = np.argsort(-sims)[: self.top_k]
-        return [self.documents[i] for i in top_idx]
+
+        results: list[Document] = []
+        seen: set[str] = set()
+
+        def add(doc: Document) -> None:
+            # Docs without an id (defensive) can't be deduped by id, so always keep.
+            if doc.id and doc.id in seen:
+                return
+            if doc.id:
+                seen.add(doc.id)
+            results.append(doc)
+
+        for i in top_idx:
+            doc = self.documents[i]
+            add(doc)
+            parent = self._by_id.get(doc.parent_id) if doc.parent_id else None
+            if parent is not None:
+                add(parent)
+        return results
 
     def answer(self, query: str, facts: dict | None = None) -> str:
         return self.generator.generate(query, self.retrieve(query, facts))

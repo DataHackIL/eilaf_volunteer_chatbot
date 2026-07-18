@@ -29,11 +29,21 @@ class Document:
     (``type``/``area`` today; ``min_age``/``max_age``/``gender``/``locality``
     once the deferred extraction pass fills them). A missing key means NaN —
     unconstrained — and never causes the chunk to be filtered out.
+
+    ``id`` / ``parent_id`` locate the chunk in its source section-tree, so
+    retrieval can reattach a matched node's immediate parent (see
+    :meth:`~chatbot.rag.pipeline.pipeline.RAGPipeline.retrieve`). ``id`` is a
+    path-based id (``source#0/2/1`` = child 0 → child 2 → child 1); ``parent_id``
+    is the immediate structural parent's id (``None`` at the top level, or for
+    non-tree docx/pdf/txt chunks). A ``parent_id`` may reference a heading-only
+    node that never became a Document — such a parent simply won't resolve.
     """
 
     text: str
     source: str = ""
     meta: dict = field(default_factory=dict)
+    id: str = ""
+    parent_id: str | None = None
 
 
 def _read_pdf(path: Path) -> str:
@@ -113,11 +123,16 @@ def _flatten_json_tree(data: dict, source: str) -> list[Document]:
     documents: list[Document] = []
     root_meta = _root_meta(data)
 
+    def node_id(path: tuple[int, ...]) -> str:
+        return f"{source}#{'/'.join(map(str, path))}"
+
     def label(node: dict) -> str:
         parts = (node.get("marker", ""), node.get("heading", ""))
         return " ".join(part for part in parts if part).strip()
 
-    def emit(text: str, crumbs: list[str], meta: dict) -> None:
+    def emit(
+        text: str, crumbs: list[str], meta: dict, id: str, parent_id: str | None
+    ) -> None:
         text = (text or "").strip()
         if not text:
             return
@@ -127,22 +142,29 @@ def _flatten_json_tree(data: dict, source: str) -> list[Document]:
                 text=f"{prefix}\n{text}" if prefix else text,
                 source=source,
                 meta=dict(meta),
+                id=id,
+                parent_id=parent_id,
             )
         )
 
-    emit(data.get("lead", ""), [title], root_meta)  # kolzchut intro paragraph
+    # kolzchut intro paragraph — top-level content, so no structural parent.
+    emit(data.get("lead", ""), [title], root_meta, id=f"{source}#lead", parent_id=None)
 
-    def walk(nodes: list, crumbs: list[str], meta: dict) -> None:
-        for node in nodes:
+    def walk(nodes: list, crumbs: list[str], meta: dict, parent_path: tuple[int, ...]) -> None:
+        for index, node in enumerate(nodes):
+            path = parent_path + (index,)
             child_crumbs = crumbs + [label(node)]
             node_meta = _node_meta(node, meta)
+            # A top-level node's parent is the title/root, which is not a
+            # Document — so ``parent_id`` is None there and won't resolve.
+            parent_id = node_id(parent_path) if parent_path else None
             # Skip segments the enrich stage judged useless (headers, stubs,
             # meaningless lines); a missing flag (un-enriched) keeps the node.
             if node.get("useful", True):
-                emit(node.get("text", ""), child_crumbs, node_meta)
-            walk(node.get("children", []), child_crumbs, node_meta)
+                emit(node.get("text", ""), child_crumbs, node_meta, node_id(path), parent_id)
+            walk(node.get("children", []), child_crumbs, node_meta, path)
 
-    walk(data.get("children", []), [title], root_meta)
+    walk(data.get("children", []), [title], root_meta, ())
     return documents
 
 
@@ -165,10 +187,14 @@ def load_documents(static_dir: str | Path, max_chars: int = 500) -> list[Documen
             documents.extend(_flatten_json_tree(data, source=path.name))
         elif suffix == ".docx":
             texts = _read_docx_paragraphs(path)
-            documents.extend(Document(text=text, source=path.name) for text in texts)
+            documents.extend(
+                Document(text=text, source=path.name, id=f"{path.name}#{i}")
+                for i, text in enumerate(texts)
+            )
         else:
             raw = _read_pdf(path) if suffix == ".pdf" else _read_txt(path)
             documents.extend(
-                Document(text=text, source=path.name) for text in _chunk(raw, max_chars)
+                Document(text=text, source=path.name, id=f"{path.name}#{i}")
+                for i, text in enumerate(_chunk(raw, max_chars))
             )
     return documents

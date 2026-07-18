@@ -1,8 +1,9 @@
-"""Tests for retrieval's immediate-parent expansion and dedup.
+"""Tests for retrieval's sibling + immediate-parent expansion and dedup.
 
 Scoring is stubbed so the tests exercise only the expansion logic: given a fixed
-ranking of matches, each match's immediate parent is appended once, on top of the
-top-k, deduped by id.
+ranking of matches, each match is expanded with its nearest siblings and its
+immediate parent, on top of the top-k, all deduped by id. Parent-only behaviour
+is isolated with ``sibling_k=0``; sibling behaviour has its own cases below.
 """
 
 from __future__ import annotations
@@ -54,32 +55,93 @@ def _pipeline(monkeypatch, ranked_ids: list[str], top_k: int = 2) -> RAGPipeline
 
 def test_parent_appended_after_match(monkeypatch):
     pipe = _pipeline(monkeypatch, ["src.json#0/0"], top_k=1)
-    ids = [d.id for d in pipe.retrieve("q")]
+    ids = [d.id for d in pipe.retrieve("q", sibling_k=0)]
     assert ids == ["src.json#0/0", "src.json#0"]  # clause, then its section
 
 
 def test_shared_parent_added_once(monkeypatch):
     pipe = _pipeline(monkeypatch, ["src.json#0/0", "src.json#0/1"], top_k=2)
-    ids = [d.id for d in pipe.retrieve("q")]
+    ids = [d.id for d in pipe.retrieve("q", sibling_k=0)]
     # A1, its parent A, then A2 — the shared parent A is not repeated.
     assert ids == ["src.json#0/0", "src.json#0", "src.json#0/1"]
 
 
 def test_match_that_is_a_parent_is_not_doubled(monkeypatch):
     pipe = _pipeline(monkeypatch, ["src.json#0/0", "src.json#0"], top_k=2)
-    ids = [d.id for d in pipe.retrieve("q")]
+    ids = [d.id for d in pipe.retrieve("q", sibling_k=0)]
     assert ids == ["src.json#0/0", "src.json#0"]  # A added by expansion, not again
 
 
 def test_heading_only_parent_is_not_appended(monkeypatch):
     pipe = _pipeline(monkeypatch, ["src.json#1/0"], top_k=1)
-    ids = [d.id for d in pipe.retrieve("q")]
+    ids = [d.id for d in pipe.retrieve("q", sibling_k=0)]
     assert ids == ["src.json#1/0"]  # B1's parent isn't a Document -> nothing added
 
 
-def test_result_size_bounded_by_twice_top_k(monkeypatch):
+def test_nearest_sibling_appended_before_parent(monkeypatch):
+    # A1 is the sole match; its peer A2 (same parent) is pulled in, then parent A.
+    pipe = _pipeline(monkeypatch, ["src.json#0/0"], top_k=1)
+    ids = [d.id for d in pipe.retrieve("q", sibling_k=1)]
+    assert ids == ["src.json#0/0", "src.json#0/1", "src.json#0"]
+
+
+def test_sibling_k_zero_disables_siblings(monkeypatch):
+    pipe = _pipeline(monkeypatch, ["src.json#0/0"], top_k=1)
+    ids = [d.id for d in pipe.retrieve("q", sibling_k=0)]
+    assert ids == ["src.json#0/0", "src.json#0"]  # peer A2 not pulled in
+
+
+def test_top_level_node_has_no_siblings(monkeypatch):
+    # Parent A (src.json#0) is top-level (parent_id=None) -> no sibling set, so a
+    # generous sibling_k pulls in nothing lateral.
+    pipe = _pipeline(monkeypatch, ["src.json#0"], top_k=1)
+    ids = [d.id for d in pipe.retrieve("q", sibling_k=3)]
+    assert ids == ["src.json#0"]
+
+
+def test_sibling_that_is_also_a_match_not_doubled(monkeypatch):
     pipe = _pipeline(monkeypatch, ["src.json#0/0", "src.json#0/1"], top_k=2)
-    assert len(pipe.retrieve("q")) <= 2 * pipe.top_k
+    ids = [d.id for d in pipe.retrieve("q", sibling_k=3)]
+    # A1, its sibling A2, shared parent A; A2 as a match adds nothing new.
+    assert ids == ["src.json#0/0", "src.json#0/1", "src.json#0"]
+
+
+def test_siblings_ranked_nearest_first_and_capped(monkeypatch):
+    # A section with four clauses; match C0, so its three peers C1/C2/C3 rank as
+    # siblings. Cap at 2 -> only the two nearest by similarity, in that order.
+    docs = [
+        Document(text="parent C", id="c.json#0", parent_id=None),
+        Document(text="clause C0", id="c.json#0/0", parent_id="c.json#0"),
+        Document(text="clause C1", id="c.json#0/1", parent_id="c.json#0"),
+        Document(text="clause C2", id="c.json#0/2", parent_id="c.json#0"),
+        Document(text="clause C3", id="c.json#0/3", parent_id="c.json#0"),
+    ]
+    pipe = RAGPipeline(
+        documents=docs,
+        embedder=RandomEmbedder(dim=8),
+        generator=ContextEchoGenerator(),
+        top_k=1,
+    )
+    # C0 is the top match; among its peers, C3 is nearest, then C1, then C2.
+    ranking = ["c.json#0/0", "c.json#0/3", "c.json#0/1", "c.json#0/2"]
+    order = {doc_id: rank for rank, doc_id in enumerate(ranking)}
+    monkeypatch.setattr(
+        pipe, "_cosine",
+        lambda m, v: np.array(
+            [len(ranking) - order.get(d.id, len(ranking)) for d in pipe.documents],
+            dtype=np.float64,
+        ),
+    )
+    ids = [d.id for d in pipe.retrieve("q", sibling_k=2)]
+    # C0, then its two nearest peers (C3 before C1), then parent C.
+    assert ids == ["c.json#0/0", "c.json#0/3", "c.json#0/1", "c.json#0"]
+
+
+def test_result_size_bounded(monkeypatch):
+    pipe = _pipeline(monkeypatch, ["src.json#0/0", "src.json#0/1"], top_k=2)
+    sibling_k = 3
+    bound = (2 + sibling_k) * pipe.top_k
+    assert len(pipe.retrieve("q", sibling_k=sibling_k)) <= bound
 
 
 class _FixedEmbedder(Embedder):

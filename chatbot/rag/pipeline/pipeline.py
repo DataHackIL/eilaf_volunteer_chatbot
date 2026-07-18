@@ -49,6 +49,7 @@ class RAGPipeline:
         generator: Generator,
         metadata_filter: MetadataFilter | None = None,
         top_k: int = 5,
+        sibling_k: int = 3,
         context_weight: float = DEFAULT_CONTEXT_WEIGHT,
         cache_dir: str | Path | None = None,
     ):
@@ -57,10 +58,19 @@ class RAGPipeline:
         self.generator = generator
         self.metadata_filter = metadata_filter or SoftMetadataFilter()
         self.top_k = top_k
+        self.sibling_k = sibling_k
         self.context_weight = context_weight
         # Index by id so retrieval can reattach a matched node's parent. Ids are
         # unique per corpus; a heading-only parent simply isn't in the map.
         self._by_id = {d.id: d for d in self.documents if d.id}
+        # Group document *indices* by structural parent, so retrieval can pull a
+        # match's nearest siblings. Only real parents group: top-level nodes (and
+        # non-tree docx/pdf/txt chunks) carry ``parent_id=None`` and must not be
+        # lumped into one giant corpus-wide sibling set — so they're left out.
+        self._siblings: dict[str, list[int]] = {}
+        for idx, d in enumerate(self.documents):
+            if d.parent_id:
+                self._siblings.setdefault(d.parent_id, []).append(idx)
         self._embeddings = self._embed(cache_dir)
 
     def _embed(self, cache_dir: str | Path | None) -> np.ndarray:
@@ -103,8 +113,9 @@ class RAGPipeline:
         facts: dict | None = None,
         context: str | None = DEFAULT_CONTEXT_ANCHOR,
         context_weight: float | None = None,
+        sibling_k: int | None = None,
     ) -> list[Document]:
-        """Retrieve the top-k chunks, each followed by its immediate parent.
+        """Retrieve the top-k chunks, each with its nearest siblings and parent.
 
         ``context`` is an optional second query line — a brief description of the
         violent event — blended into the query embedding by ``context_weight``
@@ -114,13 +125,19 @@ class RAGPipeline:
         default for this call only (it affects the query vector, not the cached
         corpus embeddings), so a UI can tune it live without rebuilding.
 
-        Scoring and top-k selection are unchanged; after selecting the matches,
-        each one's immediate parent section (from the source tree) is appended as
-        extra context so a matched clause carries its parent's framing prose.
-        Parents are looked up by ``parent_id`` and deduped by id, so siblings
-        sharing a parent add it once and a match that is another match's parent
-        is never doubled. A heading-only parent that never became a Document
-        simply doesn't resolve. Result size is at most ~2×``top_k``.
+        Scoring and top-k selection are unchanged. After selecting the matches,
+        each one is expanded with two kinds of structural context from the source
+        tree: its ``sibling_k`` nearest siblings (peer clauses under the same
+        parent, ranked by the same query similarity) for lateral context, then
+        its immediate parent section for its framing prose. ``sibling_k``
+        overrides the instance default for this call only, so a UI can tune it
+        live. Siblings share the match's already-computed similarity ranking, so
+        they respect any metadata adjustment; the parent is looked up by id and
+        is not re-scored. Everything is deduped by id via one ``seen`` set, so a
+        shared parent or sibling is added once and a match that is another
+        match's parent/sibling is never doubled. Heading-only parents (and the
+        top-level nodes that have no structural parent) simply don't resolve.
+        Result size is at most ~(2 + ``sibling_k``)×``top_k``.
 
         ``facts`` maps answered fields (``age``/``gender``/``locality``) to
         their values; omitted fields don't constrain anything. See
@@ -129,6 +146,7 @@ class RAGPipeline:
         """
         if not self.documents:
             return []
+        n_sib = self.sibling_k if sibling_k is None else sibling_k
         query_vec = self._encode_query(query, context, context_weight)
         sims = self._cosine(self._embeddings, query_vec)
         if facts:
@@ -149,10 +167,27 @@ class RAGPipeline:
         for i in top_idx:
             doc = self.documents[i]
             add(doc)
+            for sib_idx in self._nearest_siblings(i, doc.parent_id, sims, n_sib):
+                add(self.documents[sib_idx])
             parent = self._by_id.get(doc.parent_id) if doc.parent_id else None
             if parent is not None:
                 add(parent)
         return results
+
+    def _nearest_siblings(
+        self, idx: int, parent_id: str | None, sims: np.ndarray, k: int
+    ) -> list[int]:
+        """The ``k`` doc indices sharing ``parent_id``, excluding ``idx``, by sim.
+
+        Reuses the already-computed ``sims`` (so no extra encoding), returning the
+        highest-scoring peers under the same structural parent. Empty when the
+        node has no real parent (top-level / non-tree chunks) or when ``k <= 0``.
+        """
+        if not parent_id or k <= 0:
+            return []
+        peers = [j for j in self._siblings.get(parent_id, ()) if j != idx]
+        peers.sort(key=lambda j: sims[j], reverse=True)
+        return peers[:k]
 
     def answer(
         self,
@@ -160,9 +195,10 @@ class RAGPipeline:
         facts: dict | None = None,
         context: str | None = DEFAULT_CONTEXT_ANCHOR,
         context_weight: float | None = None,
+        sibling_k: int | None = None,
     ) -> str:
         return self.generator.generate(
-            query, self.retrieve(query, facts, context, context_weight)
+            query, self.retrieve(query, facts, context, context_weight, sibling_k)
         )
 
     def _encode_query(

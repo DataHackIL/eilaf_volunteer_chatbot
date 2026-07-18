@@ -69,6 +69,13 @@ context_weight = st.sidebar.slider(
     value=float(pipeline.context_weight), step=0.05,
 )
 
+# How many nearest peer clauses to append per match for lateral context. Like
+# the weight above, it's a per-query override, so no rebuild of the pipeline.
+sibling_k = st.sidebar.slider(
+    T.SIBLING_K.value, min_value=0, max_value=5,
+    value=int(pipeline.sibling_k), step=1,
+)
+
 # Optional closed-form filters. Blank answers stay out of `facts`, so they
 # don't constrain retrieval. Tag *values* on the corpus come in a later
 # scraping pass; until then these are wired but inert.
@@ -102,7 +109,8 @@ if locality is not None:
 
 if query:
     contexts = pipeline.retrieve(
-        query, facts or None, context=context, context_weight=context_weight
+        query, facts or None, context=context, context_weight=context_weight,
+        sibling_k=sibling_k,
     )
     answer = pipeline.generator.generate(query, contexts)
 

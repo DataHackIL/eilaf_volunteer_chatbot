@@ -119,6 +119,13 @@ def test_empty_context_uses_query_only():
         assert pipe._encode_query("q", empty) == pytest.approx([1.0, 0.0])
 
 
+def test_per_call_weight_overrides_instance_default():
+    pipe = _blend_pipeline(context_weight=0.4)
+    # Override wins; None falls back to the instance default.
+    assert pipe._encode_query("q", "ctx", 0.25) == pytest.approx([0.75, 0.25])
+    assert pipe._encode_query("q", "ctx", None) == pytest.approx([0.6, 0.4])
+
+
 def test_blend_normalises_each_line_first():
     # Give the context a non-unit norm; it must be normalised before mixing, so
     # the weight — not the raw magnitude — governs its pull.

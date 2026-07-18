@@ -61,6 +61,14 @@ query = st.text_input(T.QUERY_PROMPT.value)
 # refine it or clear it. Blended into the query embedding by `context_weight`.
 context = st.text_input(T.CONTEXT_PROMPT.value, value=DEFAULT_CONTEXT_ANCHOR)
 
+# How hard the event description pulls the query vector, 0 (ignore) .. 1 (only
+# the description). A live tuning knob: it re-encodes the query per query, so it
+# needs no rebuild of the cached pipeline. Defaults to the pipeline's own value.
+context_weight = st.sidebar.slider(
+    T.CONTEXT_WEIGHT.value, min_value=0.0, max_value=1.0,
+    value=float(pipeline.context_weight), step=0.05,
+)
+
 # Optional closed-form filters. Blank answers stay out of `facts`, so they
 # don't constrain retrieval. Tag *values* on the corpus come in a later
 # scraping pass; until then these are wired but inert.
@@ -93,7 +101,9 @@ if locality is not None:
     facts["locality"] = locality.hebrew
 
 if query:
-    contexts = pipeline.retrieve(query, facts or None, context=context)
+    contexts = pipeline.retrieve(
+        query, facts or None, context=context, context_weight=context_weight
+    )
     answer = pipeline.generator.generate(query, contexts)
 
     st.subheader(T.ANSWER.value)

@@ -102,6 +102,7 @@ class RAGPipeline:
         query: str,
         facts: dict | None = None,
         context: str | None = DEFAULT_CONTEXT_ANCHOR,
+        context_weight: float | None = None,
     ) -> list[Document]:
         """Retrieve the top-k chunks, each followed by its immediate parent.
 
@@ -109,7 +110,9 @@ class RAGPipeline:
         violent event — blended into the query embedding by ``context_weight``
         (see :func:`_encode_query`) to steer retrieval toward the right domain.
         It defaults to :data:`DEFAULT_CONTEXT_ANCHOR`; pass ``None``/``""`` to
-        query on ``query`` alone.
+        query on ``query`` alone. ``context_weight`` overrides the instance
+        default for this call only (it affects the query vector, not the cached
+        corpus embeddings), so a UI can tune it live without rebuilding.
 
         Scoring and top-k selection are unchanged; after selecting the matches,
         each one's immediate parent section (from the source tree) is appended as
@@ -126,7 +129,7 @@ class RAGPipeline:
         """
         if not self.documents:
             return []
-        query_vec = self._encode_query(query, context)
+        query_vec = self._encode_query(query, context, context_weight)
         sims = self._cosine(self._embeddings, query_vec)
         if facts:
             sims = sims + self.metadata_filter.adjust(self.documents, facts)
@@ -156,26 +159,33 @@ class RAGPipeline:
         query: str,
         facts: dict | None = None,
         context: str | None = DEFAULT_CONTEXT_ANCHOR,
+        context_weight: float | None = None,
     ) -> str:
-        return self.generator.generate(query, self.retrieve(query, facts, context))
+        return self.generator.generate(
+            query, self.retrieve(query, facts, context, context_weight)
+        )
 
-    def _encode_query(self, query: str, context: str | None) -> np.ndarray:
+    def _encode_query(
+        self, query: str, context: str | None, weight: float | None = None
+    ) -> np.ndarray:
         """Embed the query, blended with the optional domain ``context`` line.
 
         With no context, this is a plain single-text encode. Otherwise both
         lines are encoded and each L2-normalised (so the blend is a true
         interpolation on the unit sphere regardless of the embedder), then mixed
-        ``(1 - w)·query + w·context``. ``context_weight`` w — not the two lines'
-        relative token lengths — sets the anchor's pull, which is the whole point
-        of feeding it separately rather than concatenating. ``_cosine`` re-norms
-        at scoring time, so the blended vector needn't be unit-length here.
+        ``(1 - w)·query + w·context``. The weight w — ``weight`` when given, else
+        the instance ``context_weight`` — not the two lines' relative token
+        lengths, sets the anchor's pull, which is the whole point of feeding it
+        separately rather than concatenating. ``_cosine`` re-norms at scoring
+        time, so the blended vector needn't be unit-length here.
         """
         if not context or not context.strip():
             return self.embedder.encode([query])[0]
+        w = self.context_weight if weight is None else weight
         vecs = self.embedder.encode([query, context]).astype(np.float64)
         vecs /= np.linalg.norm(vecs, axis=1, keepdims=True) + 1e-8
         query_vec, context_vec = vecs
-        return (1 - self.context_weight) * query_vec + self.context_weight * context_vec
+        return (1 - w) * query_vec + w * context_vec
 
     @staticmethod
     def _cosine(matrix: np.ndarray, vector: np.ndarray) -> np.ndarray:

@@ -17,7 +17,7 @@ from pathlib import Path
 import numpy as np
 
 from chatbot.rag.documents import Document, load_documents
-from chatbot.rag.embedder import Embedder, SentenceTransformerEmbedder
+from chatbot.rag.embedder import E5Embedder, Embedder
 from chatbot.rag.filters import MetadataFilter, SoftMetadataFilter
 from chatbot.rag.generator import ContextEchoGenerator, Generator
 from chatbot.rag.pipeline.embedding_cache import load_or_encode
@@ -84,7 +84,7 @@ class RAGPipeline:
             return np.zeros((0, 1), dtype=np.float32)
         if cache_dir is not None:
             return load_or_encode(self.embedder, texts, cache_dir)
-        return self.embedder.encode(texts)
+        return self.embedder.encode_documents(texts)
 
     @classmethod
     def from_static_dir(
@@ -98,7 +98,7 @@ class RAGPipeline:
         """
         return cls(
             documents=load_documents(static_dir),
-            embedder=SentenceTransformerEmbedder(),
+            embedder=E5Embedder(),
             generator=ContextEchoGenerator(),
             # Persist embeddings in a subdir (not matched by the loader's
             # top-level *.json/*.docx/... globs), so startup pays the encode
@@ -216,9 +216,9 @@ class RAGPipeline:
         time, so the blended vector needn't be unit-length here.
         """
         if not context or not context.strip():
-            return self.embedder.encode([query])[0]
+            return self.embedder.encode_queries([query])[0]
         w = self.context_weight if weight is None else weight
-        vecs = self.embedder.encode([query, context]).astype(np.float64)
+        vecs = self.embedder.encode_queries([query, context]).astype(np.float64)
         vecs /= np.linalg.norm(vecs, axis=1, keepdims=True) + 1e-8
         query_vec, context_vec = vecs
         return (1 - w) * query_vec + w * context_vec

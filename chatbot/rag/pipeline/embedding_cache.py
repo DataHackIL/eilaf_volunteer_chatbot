@@ -73,7 +73,7 @@ def load_or_encode(
             if matrix.shape[0] == len(texts):  # guard a truncated/partial write
                 return matrix
 
-    matrix = embedder.encode(texts)
+    matrix = embedder.encode_documents(texts)
     cache_dir.mkdir(parents=True, exist_ok=True)
     np.save(matrix_path, matrix)
     meta_path.write_text(

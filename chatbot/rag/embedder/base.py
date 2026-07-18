@@ -14,6 +14,20 @@ class Embedder(ABC):
         """Return a ``(len(texts), dim)`` float32 array of embeddings."""
         raise NotImplementedError
 
+    def encode_documents(self, texts: Sequence[str]) -> np.ndarray:
+        """Encode corpus passages for indexing.
+
+        Split from :meth:`encode_queries` for *asymmetric* models that treat a
+        query and an indexed passage differently — e.g. e5's ``query:`` /
+        ``passage:`` instruction prefixes. The default treats both alike, so
+        symmetric embedders need only implement :meth:`encode`.
+        """
+        return self.encode(texts)
+
+    def encode_queries(self, texts: Sequence[str]) -> np.ndarray:
+        """Encode search queries. See :meth:`encode_documents`."""
+        return self.encode(texts)
+
     @property
     def fingerprint(self) -> str:
         """Stable identity of this embedder's output space.

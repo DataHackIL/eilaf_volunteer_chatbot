@@ -2,8 +2,9 @@
 
 Defaults to a multilingual MiniLM model: small, fast, supports Hebrew, and
 symmetric (no query/passage prefixes), so it fits the plain ``encode()``
-interface. Swap ``model_name`` for a stronger model later (e.g. e5, which needs
-``query:``/``passage:`` prefixes).
+interface. For a stronger, asymmetric model see
+:class:`~chatbot.rag.embedder.e5.E5Embedder`, which subclasses this to add e5's
+``query:``/``passage:`` prefixes.
 """
 
 from __future__ import annotations

@@ -22,6 +22,16 @@ from chatbot.rag.filters import MetadataFilter, SoftMetadataFilter
 from chatbot.rag.generator import ContextEchoGenerator, Generator
 from chatbot.rag.pipeline.embedding_cache import load_or_encode
 
+# A short domain "anchor" prepended to the query in embedding space. The corpus
+# is single-domain (violence-victim material), so this doesn't discriminate
+# between docs — it re-centres the *query* into that region, which empirically
+# surfaces better matches. Fed as a separate query line, blended by weight (see
+# ``retrieve``), so a long user question doesn't dilute the short anchor.
+DEFAULT_CONTEXT_ANCHOR = "נפגע אירוע אלימות"
+# How much the anchor pulls the query vector, in [0, 1]: 0 ignores it, 1 discards
+# the user's question. Decoupled from text length, unlike plain concatenation.
+DEFAULT_CONTEXT_WEIGHT = 0.4
+
 # repo_root/data/static  (this file is chatbot/rag/pipeline/pipeline.py)
 _STATIC_DIR = Path(__file__).resolve().parents[3] / "data" / "static"
 # The static store is split in two: scrapers write raw section-trees to ``raw/``;
@@ -39,6 +49,7 @@ class RAGPipeline:
         generator: Generator,
         metadata_filter: MetadataFilter | None = None,
         top_k: int = 5,
+        context_weight: float = DEFAULT_CONTEXT_WEIGHT,
         cache_dir: str | Path | None = None,
     ):
         self.documents = list(documents)
@@ -46,6 +57,7 @@ class RAGPipeline:
         self.generator = generator
         self.metadata_filter = metadata_filter or SoftMetadataFilter()
         self.top_k = top_k
+        self.context_weight = context_weight
         # Index by id so retrieval can reattach a matched node's parent. Ids are
         # unique per corpus; a heading-only parent simply isn't in the map.
         self._by_id = {d.id: d for d in self.documents if d.id}
@@ -85,8 +97,19 @@ class RAGPipeline:
             **kwargs,
         )
 
-    def retrieve(self, query: str, facts: dict | None = None) -> list[Document]:
+    def retrieve(
+        self,
+        query: str,
+        facts: dict | None = None,
+        context: str | None = DEFAULT_CONTEXT_ANCHOR,
+    ) -> list[Document]:
         """Retrieve the top-k chunks, each followed by its immediate parent.
+
+        ``context`` is an optional second query line — a brief description of the
+        violent event — blended into the query embedding by ``context_weight``
+        (see :func:`_encode_query`) to steer retrieval toward the right domain.
+        It defaults to :data:`DEFAULT_CONTEXT_ANCHOR`; pass ``None``/``""`` to
+        query on ``query`` alone.
 
         Scoring and top-k selection are unchanged; after selecting the matches,
         each one's immediate parent section (from the source tree) is appended as
@@ -103,7 +126,7 @@ class RAGPipeline:
         """
         if not self.documents:
             return []
-        query_vec = self.embedder.encode([query])[0]
+        query_vec = self._encode_query(query, context)
         sims = self._cosine(self._embeddings, query_vec)
         if facts:
             sims = sims + self.metadata_filter.adjust(self.documents, facts)
@@ -128,8 +151,31 @@ class RAGPipeline:
                 add(parent)
         return results
 
-    def answer(self, query: str, facts: dict | None = None) -> str:
-        return self.generator.generate(query, self.retrieve(query, facts))
+    def answer(
+        self,
+        query: str,
+        facts: dict | None = None,
+        context: str | None = DEFAULT_CONTEXT_ANCHOR,
+    ) -> str:
+        return self.generator.generate(query, self.retrieve(query, facts, context))
+
+    def _encode_query(self, query: str, context: str | None) -> np.ndarray:
+        """Embed the query, blended with the optional domain ``context`` line.
+
+        With no context, this is a plain single-text encode. Otherwise both
+        lines are encoded and each L2-normalised (so the blend is a true
+        interpolation on the unit sphere regardless of the embedder), then mixed
+        ``(1 - w)·query + w·context``. ``context_weight`` w — not the two lines'
+        relative token lengths — sets the anchor's pull, which is the whole point
+        of feeding it separately rather than concatenating. ``_cosine`` re-norms
+        at scoring time, so the blended vector needn't be unit-length here.
+        """
+        if not context or not context.strip():
+            return self.embedder.encode([query])[0]
+        vecs = self.embedder.encode([query, context]).astype(np.float64)
+        vecs /= np.linalg.norm(vecs, axis=1, keepdims=True) + 1e-8
+        query_vec, context_vec = vecs
+        return (1 - self.context_weight) * query_vec + self.context_weight * context_vec
 
     @staticmethod
     def _cosine(matrix: np.ndarray, vector: np.ndarray) -> np.ndarray:

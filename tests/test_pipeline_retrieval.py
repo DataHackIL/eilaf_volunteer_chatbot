@@ -8,8 +8,10 @@ top-k, deduped by id.
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
 from chatbot.rag.documents.documents import Document
+from chatbot.rag.embedder.base import Embedder
 from chatbot.rag.embedder.random_embedder import RandomEmbedder
 from chatbot.rag.generator.context_echo import ContextEchoGenerator
 from chatbot.rag.pipeline.pipeline import RAGPipeline
@@ -78,6 +80,56 @@ def test_heading_only_parent_is_not_appended(monkeypatch):
 def test_result_size_bounded_by_twice_top_k(monkeypatch):
     pipe = _pipeline(monkeypatch, ["src.json#0/0", "src.json#0/1"], top_k=2)
     assert len(pipe.retrieve("q")) <= 2 * pipe.top_k
+
+
+class _FixedEmbedder(Embedder):
+    """Returns preset vectors for known texts (orthogonal axes) for blend tests."""
+
+    def __init__(self, vectors: dict[str, list[float]], dim: int = 2):
+        self._vectors = {k: np.asarray(v, dtype=np.float32) for k, v in vectors.items()}
+        self._dim = dim
+
+    def encode(self, texts):  # noqa: D102
+        # Corpus docs (embedded at construction) aren't under test here, so any
+        # unknown text maps to a zero vector of the right width.
+        return np.stack([self._vectors.get(t, np.zeros(self._dim, np.float32)) for t in texts])
+
+
+def _blend_pipeline(context_weight: float) -> RAGPipeline:
+    # Query and context map to distinct orthogonal axes, so the blended vector's
+    # components read off the mix weights directly.
+    embedder = _FixedEmbedder({"q": [1.0, 0.0], "ctx": [0.0, 1.0]})
+    return RAGPipeline(
+        documents=_DOCS,
+        embedder=embedder,
+        generator=ContextEchoGenerator(),
+        context_weight=context_weight,
+    )
+
+
+def test_context_blend_mixes_by_weight():
+    pipe = _blend_pipeline(context_weight=0.4)
+    vec = pipe._encode_query("q", "ctx")
+    assert vec == pytest.approx([0.6, 0.4])  # (1-w)·query + w·context
+
+
+def test_empty_context_uses_query_only():
+    pipe = _blend_pipeline(context_weight=0.4)
+    for empty in (None, "", "   "):
+        assert pipe._encode_query("q", empty) == pytest.approx([1.0, 0.0])
+
+
+def test_blend_normalises_each_line_first():
+    # Give the context a non-unit norm; it must be normalised before mixing, so
+    # the weight — not the raw magnitude — governs its pull.
+    embedder = _FixedEmbedder({"q": [1.0, 0.0], "ctx": [0.0, 10.0]})
+    pipe = RAGPipeline(
+        documents=_DOCS,
+        embedder=embedder,
+        generator=ContextEchoGenerator(),
+        context_weight=0.4,
+    )
+    assert pipe._encode_query("q", "ctx") == pytest.approx([0.6, 0.4])
 
 
 def test_empty_corpus_returns_empty():

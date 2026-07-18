@@ -13,6 +13,7 @@ import streamlit as st
 from app.localities import load_localities
 from app.visualizer.i18n import TEXTS, Language
 from chatbot.rag.pipeline import RAGPipeline
+from chatbot.rag.pipeline.pipeline import DEFAULT_CONTEXT_ANCHOR
 
 # `set_page_config` must be the first Streamlit call, so read the language the
 # user previously picked from session state (defaulting to Hebrew) before the
@@ -55,6 +56,11 @@ if not pipeline.documents:
 
 query = st.text_input(T.QUERY_PROMPT.value)
 
+# Optional second query line describing the event. Prefilled with the domain
+# anchor, which steers retrieval toward violence-victim material; the user can
+# refine it or clear it. Blended into the query embedding by `context_weight`.
+context = st.text_input(T.CONTEXT_PROMPT.value, value=DEFAULT_CONTEXT_ANCHOR)
+
 # Optional closed-form filters. Blank answers stay out of `facts`, so they
 # don't constrain retrieval. Tag *values* on the corpus come in a later
 # scraping pass; until then these are wired but inert.
@@ -87,7 +93,7 @@ if locality is not None:
     facts["locality"] = locality.hebrew
 
 if query:
-    contexts = pipeline.retrieve(query, facts or None)
+    contexts = pipeline.retrieve(query, facts or None, context=context)
     answer = pipeline.generator.generate(query, contexts)
 
     st.subheader(T.ANSWER.value)

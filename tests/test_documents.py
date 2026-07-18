@@ -39,7 +39,7 @@ def tree() -> dict:
 
 
 def test_ids_encode_index_path(tree):
-    docs = _flatten_json_tree(tree, source="src.json")
+    docs = _flatten_json_tree(tree, source="src.json", merge_chars=0)
     by_id = {d.id: d for d in docs}
 
     # child 0 (A), its children 0/0 (A1) and 0/1 (A2), and 1/0 (B1).
@@ -49,7 +49,7 @@ def test_ids_encode_index_path(tree):
 
 
 def test_parent_id_links_to_immediate_parent(tree):
-    by_id = {d.id: d for d in _flatten_json_tree(tree, source="src.json")}
+    by_id = {d.id: d for d in _flatten_json_tree(tree, source="src.json", merge_chars=0)}
 
     # Clauses point at their section; the section is top-level so has no parent.
     assert by_id["src.json#0/0"].parent_id == "src.json#0"
@@ -58,7 +58,7 @@ def test_parent_id_links_to_immediate_parent(tree):
 
 
 def test_heading_only_parent_is_absent_from_map(tree):
-    docs = _flatten_json_tree(tree, source="src.json")
+    docs = _flatten_json_tree(tree, source="src.json", merge_chars=0)
     by_id = {d.id: d for d in docs}
 
     b1 = by_id["src.json#1/0"]
@@ -75,3 +75,30 @@ def test_lead_is_top_level_with_no_parent():
     lead = next(d for d in docs if d.id == "src.json#lead")
     assert lead.parent_id is None
     assert lead.text.endswith("intro text")
+
+
+def test_small_subtree_collapses_to_one_document(tree):
+    # With a generous merge budget, section A's tiny clause list rolls up into a
+    # single Document instead of three — sub-markers kept so structure survives.
+    docs = _flatten_json_tree(tree, source="src.json", merge_chars=500)
+    by_id = {d.id: d for d in docs}
+
+    # A collapses to just A's id; its clause ids no longer exist on their own.
+    assert "src.json#0" in by_id
+    assert "src.json#0/0" not in by_id
+    assert "src.json#0/1" not in by_id
+    a = by_id["src.json#0"]
+    assert "parent A body" in a.text
+    assert "A1 clause A1" in a.text  # descendant marker preserved inline
+    assert "A2 clause A2" in a.text
+    # B (heading-only) collapses around its single clause under B's id.
+    assert "src.json#1" in by_id
+    assert "B1 clause B1" in by_id["src.json#1"].text
+
+
+def test_large_subtree_still_recurses(tree):
+    # A merge budget below the subtree total keeps the section split into nodes,
+    # so the id/parent substrate is intact for genuinely large sections.
+    docs = _flatten_json_tree(tree, source="src.json", merge_chars=5)
+    by_id = {d.id: d for d in docs}
+    assert {"src.json#0", "src.json#0/0", "src.json#0/1", "src.json#1/0"} <= set(by_id)

@@ -52,3 +52,11 @@ select = [
 # Line length is enforced by the formatter; E501 only adds noise for strings
 # and docstrings the formatter deliberately leaves alone.
 ignore = ["E501"]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

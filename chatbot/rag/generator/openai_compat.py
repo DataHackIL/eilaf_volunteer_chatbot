@@ -34,7 +34,10 @@ from chatbot.rag.generator.base import Generator
 BASE_URL = "https://api.cerebras.ai/v1"
 KEY_ENV = "CEREBRAS_API_KEY"
 MODEL = "gpt-oss-120b"
-_MAX_TOKENS = 1024
+# gpt-oss (and other reasoning models) spend completion budget on internal
+# reasoning before the visible answer, so keep headroom to avoid a truncated
+# reply — same failure mode as Gemini thinking models.
+_MAX_TOKENS = 4096
 
 
 class OpenAICompatibleGenerator(Generator):

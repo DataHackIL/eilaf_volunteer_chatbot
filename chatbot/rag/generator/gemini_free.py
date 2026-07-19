@@ -23,7 +23,11 @@ from chatbot.rag.generator.fallback import FallbackGenerator
 # Centralized so the model tier is a one-line change. flash-lite is the cheapest
 # free-tier chat model, with a higher daily request cap than flash for interactive use.
 MODEL = "gemini-3.1-flash-lite"
-_MAX_OUTPUT_TOKENS = 1024
+# max_output_tokens bounds thinking + visible answer *combined* on Gemini
+# thinking models (2.5 / 3.x). A low cap lets internal thinking eat the whole
+# budget and truncate the answer mid-sentence (finish_reason=MAX_TOKENS), so give
+# ample headroom for the reasoning plus the reply.
+_MAX_OUTPUT_TOKENS = 4096
 
 # On a 429 we wait and retry the same query rather than dropping the answer.
 _MAX_RETRIES = 5

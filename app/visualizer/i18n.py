@@ -51,6 +51,11 @@ class HebrewText(Enum):
     NO_ANSWER = "אין תשובה."
     SOURCES = "מקורות"
     LANGUAGE_LABEL = "שפה"
+    GENERATOR = "מנוע התשובה"
+    GEN_ECHO = "קטעים שאוחזרו (ללא ניסוח)"
+    GEN_CLAUDE = "Claude"
+    GEN_GEMINI = "Gemini (חינמי)"
+    GENERATOR_ERROR = "יצירת התשובה נכשלה: {error}"
 
 
 class ArabicText(Enum):
@@ -74,6 +79,11 @@ class ArabicText(Enum):
     NO_ANSWER = "ما في جواب."
     SOURCES = "المصادر"
     LANGUAGE_LABEL = "اللغة"
+    GENERATOR = "محرك الجواب"
+    GEN_ECHO = "المقاطع المسترجعة (بدون صياغة)"
+    GEN_CLAUDE = "Claude"
+    GEN_GEMINI = "Gemini (مجاني)"
+    GENERATOR_ERROR = "فشل توليد الجواب: {error}"
 
 
 class EnglishText(Enum):
@@ -96,6 +106,11 @@ class EnglishText(Enum):
     NO_ANSWER = "No answer."
     SOURCES = "Sources"
     LANGUAGE_LABEL = "Language"
+    GENERATOR = "Answer engine"
+    GEN_ECHO = "Retrieved passages (no phrasing)"
+    GEN_CLAUDE = "Claude"
+    GEN_GEMINI = "Gemini (free)"
+    GENERATOR_ERROR = "Answer generation failed: {error}"
 
 
 TEXTS: dict[Language, type[Enum]] = {

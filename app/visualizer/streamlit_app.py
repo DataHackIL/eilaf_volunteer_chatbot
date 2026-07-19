@@ -8,12 +8,26 @@ Run from the repo root::
     streamlit run app/visualizer/streamlit_app.py
 """
 
+from pathlib import Path
+
 import streamlit as st
+from dotenv import load_dotenv
 
 from app.localities import load_localities
 from app.visualizer.i18n import TEXTS, Language
+from chatbot.rag.generator import (
+    ClaudeGenerator,
+    ContextEchoGenerator,
+    GeminiGenerator,
+    Generator,
+)
 from chatbot.rag.pipeline import RAGPipeline
 from chatbot.rag.pipeline.pipeline import DEFAULT_CONTEXT_ANCHOR
+
+# Load GEMINI_API_KEY / ANTHROPIC_API_KEY from the repo-root .env so the LLM
+# generators can authenticate. Explicit path (not a bare load_dotenv(), which
+# searches up from this file) so it resolves however `streamlit run` is invoked.
+load_dotenv(Path(__file__).resolve().parents[2] / ".env")
 
 # `set_page_config` must be the first Streamlit call, so read the language the
 # user previously picked from session state (defaulting to Hebrew) before the
@@ -47,6 +61,21 @@ def get_pipeline() -> RAGPipeline:
     return RAGPipeline.from_static_dir()
 
 
+@st.cache_resource
+def get_generators() -> dict[str, Generator]:
+    """Selectable answer engines, built once.
+
+    Each LLM head resolves its SDK client and API key lazily on first
+    generation, so constructing all three is cheap and needs no key up front —
+    a key is only required once the user actually picks that engine and asks.
+    """
+    return {
+        "echo": ContextEchoGenerator(),
+        "claude": ClaudeGenerator(),
+        "gemini": GeminiGenerator(),
+    }
+
+
 pipeline = get_pipeline()
 
 st.title(T.TITLE.value)
@@ -75,6 +104,19 @@ sibling_k = st.sidebar.slider(
     T.SIBLING_K.value, min_value=0, max_value=5,
     value=int(pipeline.sibling_k), step=1,
 )
+
+# Which head phrases the answer from the retrieved passages: "echo" returns them
+# verbatim (no key needed); "claude"/"gemini" generate a grounded Hebrew answer
+# and need the matching key in .env. Retrieval is identical across all three.
+gen_labels = {
+    "echo": T.GEN_ECHO.value,
+    "claude": T.GEN_CLAUDE.value,
+    "gemini": T.GEN_GEMINI.value,
+}
+gen_key = st.sidebar.selectbox(
+    T.GENERATOR.value, options=list(gen_labels), format_func=lambda k: gen_labels[k]
+)
+generator = get_generators()[gen_key]
 
 # Optional closed-form filters. Blank answers stay out of `facts`, so they
 # don't constrain retrieval. Tag *values* on the corpus come in a later
@@ -112,7 +154,14 @@ if query:
         query, facts or None, context=context, context_weight=context_weight,
         sibling_k=sibling_k,
     )
-    answer = pipeline.generator.generate(query, contexts)
+    # A missing key or an exhausted free-tier quota surfaces here as an SDK
+    # error; show it instead of crashing the app (retrieval already succeeded,
+    # so the sources below still render).
+    try:
+        answer = generator.generate(query, contexts)
+    except Exception as exc:
+        st.error(T.GENERATOR_ERROR.value.format(error=exc))
+        answer = ""
 
     st.subheader(T.ANSWER.value)
     st.write(answer or T.NO_ANSWER.value)

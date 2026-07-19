@@ -25,7 +25,7 @@ from data.enrich.claude_enricher import _SYSTEM
 
 # Centralized so the model tier is a one-line change. flash-lite is the cheapest
 # free-tier model and plenty for this bulk closed-form classification.
-MODEL = "gemini-3.1-flash-lite"
+MODEL = "gemini-3-flash-preview"
 
 # Free-tier rate limits are per-minute (RPM); on a 429 we back off and retry the
 # same segment rather than dropping it.
@@ -51,8 +51,9 @@ def _annotation_schema():
             "gender": types.Schema(
                 type=types.Type.STRING, enum=["m", "f"], nullable=True
             ),
+            "useful": types.Schema(type=types.Type.BOOLEAN),
         },
-        required=["min_age", "max_age", "gender"],
+        required=["min_age", "max_age", "gender", "useful"],
     )
 
 

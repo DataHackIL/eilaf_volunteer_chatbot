@@ -38,7 +38,7 @@ def main() -> None:
         "--provider",
         choices=sorted(_ENRICHERS),
         default="claude",
-        help="which LLM back-end to enrich with (default: claude).",
+        help="which LLM back-end to enrich with (gemini/claude; default: claude).",
     )
     parser.add_argument(
         "--dry-run",

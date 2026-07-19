@@ -13,6 +13,7 @@ The pipeline is: **scrape (raw/) -> enrich (enriched/) -> load**. See
 from data.enrich.base import SegmentAnnotation, SegmentEnricher
 from data.enrich.claude_enricher import ClaudeSegmentEnricher
 from data.enrich.gemini_enricher import GeminiSegmentEnricher
+from data.enrich.openai_enricher import OpenAICompatibleSegmentEnricher
 from data.enrich.rules import is_obvious_junk
 
 __all__ = [
@@ -20,5 +21,6 @@ __all__ = [
     "SegmentEnricher",
     "ClaudeSegmentEnricher",
     "GeminiSegmentEnricher",
+    "OpenAICompatibleSegmentEnricher",
     "is_obvious_junk",
 ]

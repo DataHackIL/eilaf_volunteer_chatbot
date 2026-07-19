@@ -5,8 +5,9 @@ Reads ``data/static/raw/*.json``, writes annotated copies to
 copy so re-runs only bill the LLM for new/changed segments.
 
 Modes / cost control (neither back-end has a built-in spend cap):
-  --provider P  which LLM back-end to enrich with: ``claude`` (default) or
-                ``gemini`` (Google AI free tier).
+  --provider P  which LLM back-end to enrich with: ``claude`` (default),
+                ``gemini`` (Google AI free tier), or ``cerebras`` (OpenAI-compatible
+                free tier).
   --dry-run     report how many segments would be sent to the LLM; call nothing.
   --no-llm      rules-only pass: drop obvious junk, leave the rest untagged, and
                 write every file — no API key needed. The deferred segments get
@@ -24,11 +25,13 @@ from chatbot.rag.pipeline.pipeline import DEFAULT_STATIC_DIR, RAW_STATIC_DIR
 from data.enrich.claude_enricher import ClaudeSegmentEnricher
 from data.enrich.enrich_store import annotate_tree
 from data.enrich.gemini_enricher import GeminiSegmentEnricher
+from data.enrich.openai_enricher import OpenAICompatibleSegmentEnricher
 
 # Maps --provider to the enricher class; add a back-end here in one place.
 _ENRICHERS = {
     "claude": ClaudeSegmentEnricher,
     "gemini": GeminiSegmentEnricher,
+    "cerebras": OpenAICompatibleSegmentEnricher,
 }
 
 
@@ -38,7 +41,7 @@ def main() -> None:
         "--provider",
         choices=sorted(_ENRICHERS),
         default="claude",
-        help="which LLM back-end to enrich with (gemini/claude; default: claude).",
+        help="which LLM back-end to enrich with (claude/gemini/cerebras; default: claude).",
     )
     parser.add_argument(
         "--dry-run",

@@ -18,8 +18,9 @@ from app.visualizer.i18n import TEXTS, Language
 from chatbot.rag.generator import (
     ClaudeGenerator,
     ContextEchoGenerator,
-    GeminiGenerator,
     Generator,
+    OpenAICompatibleGenerator,
+    gemini_rotation,
 )
 from chatbot.rag.pipeline import RAGPipeline
 from chatbot.rag.pipeline.pipeline import DEFAULT_CONTEXT_ANCHOR
@@ -72,7 +73,8 @@ def get_generators() -> dict[str, Generator]:
     return {
         "echo": ContextEchoGenerator(),
         "claude": ClaudeGenerator(),
-        "gemini": GeminiGenerator(),
+        "gemini": gemini_rotation(),  # rotates Gemini models to dodge per-model quotas
+        "cerebras": OpenAICompatibleGenerator(),
     }
 
 
@@ -112,6 +114,7 @@ gen_labels = {
     "echo": T.GEN_ECHO.value,
     "claude": T.GEN_CLAUDE.value,
     "gemini": T.GEN_GEMINI.value,
+    "cerebras": T.GEN_CEREBRAS.value,
 }
 gen_key = st.sidebar.selectbox(
     T.GENERATOR.value, options=list(gen_labels), format_func=lambda k: gen_labels[k]

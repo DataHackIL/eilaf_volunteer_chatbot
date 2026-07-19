@@ -18,6 +18,7 @@ from collections.abc import Sequence
 from chatbot.rag.documents import Document
 from chatbot.rag.generator._prompt import NO_CONTEXT, SYSTEM, build_user_message
 from chatbot.rag.generator.base import Generator
+from chatbot.rag.generator.fallback import FallbackGenerator
 
 # Centralized so the model tier is a one-line change. flash-lite is the cheapest
 # free-tier chat model, with a higher daily request cap than flash for interactive use.
@@ -27,6 +28,11 @@ _MAX_OUTPUT_TOKENS = 1024
 # On a 429 we wait and retry the same query rather than dropping the answer.
 _MAX_RETRIES = 5
 _BACKOFF_SECONDS = 20
+
+# Distinct free-tier models, each with its own per-day quota. Rotating across
+# them via :func:`gemini_rotation` multiplies the free daily budget. Ordered
+# cheapest / highest-cap first.
+ROTATION_MODELS = ("gemini-3.1-flash-lite", "gemini-2.5-flash", "gemini-2.0-flash")
 
 
 class GeminiGenerator(Generator):
@@ -96,3 +102,18 @@ class GeminiGenerator(Generator):
             return response.text or ""
 
         return ""  # unreachable: last attempt either returns or re-raises
+
+
+def gemini_rotation(
+    models: Sequence[str] = ROTATION_MODELS, max_retries: int = 1
+) -> FallbackGenerator:
+    """A :class:`FallbackGenerator` over one Gemini head per model.
+
+    On a 429 (typically the per-day free quota, which is *per model*) it fails
+    over to the next model instead of waiting — so ``max_retries`` defaults to 1
+    (fail fast; no per-model backoff) since the rotation, not the retry, is the
+    recovery path. The chain still raises if *every* model is exhausted.
+    """
+    return FallbackGenerator(
+        [GeminiGenerator(model=model, max_retries=max_retries) for model in models]
+    )

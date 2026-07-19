@@ -16,6 +16,8 @@ dependencies = [
     # enrichment / LLM (Claude via the official SDK; pydantic for the
     # structured-output schema; dotenv loads the API key from a local .env)
     "anthropic",
+    # OpenAI-compatible chat endpoints (Cerebras / Groq / OpenRouter free tiers).
+    "openai",
     "pydantic",
     "python-dotenv",
     # apps

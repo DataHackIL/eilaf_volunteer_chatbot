@@ -54,7 +54,8 @@ class HebrewText(Enum):
     GENERATOR = "מנוע התשובה"
     GEN_ECHO = "קטעים שאוחזרו (ללא ניסוח)"
     GEN_CLAUDE = "Claude"
-    GEN_GEMINI = "Gemini (חינמי)"
+    GEN_GEMINI = "Gemini (חינמי, רוטציית מודלים)"
+    GEN_CEREBRAS = "Cerebras (חינמי)"
     GENERATOR_ERROR = "יצירת התשובה נכשלה: {error}"
 
 
@@ -82,7 +83,8 @@ class ArabicText(Enum):
     GENERATOR = "محرك الجواب"
     GEN_ECHO = "المقاطع المسترجعة (بدون صياغة)"
     GEN_CLAUDE = "Claude"
-    GEN_GEMINI = "Gemini (مجاني)"
+    GEN_GEMINI = "Gemini (مجاني، تدوير موديلات)"
+    GEN_CEREBRAS = "Cerebras (مجاني)"
     GENERATOR_ERROR = "فشل توليد الجواب: {error}"
 
 
@@ -109,7 +111,8 @@ class EnglishText(Enum):
     GENERATOR = "Answer engine"
     GEN_ECHO = "Retrieved passages (no phrasing)"
     GEN_CLAUDE = "Claude"
-    GEN_GEMINI = "Gemini (free)"
+    GEN_GEMINI = "Gemini (free, model rotation)"
+    GEN_CEREBRAS = "Cerebras (free)"
     GENERATOR_ERROR = "Answer generation failed: {error}"
 
 

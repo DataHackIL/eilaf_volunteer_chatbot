@@ -18,7 +18,9 @@ class RandomPassagesGenerator(Generator):
         self.n = n
         self._rng = random.Random(seed)
 
-    def generate(self, query: str, contexts: Sequence[Document]) -> str:
+    def generate(
+        self, query: str, contexts: Sequence[Document], language: str = "Hebrew"
+    ) -> str:
         if not contexts:
             return ""
         k = min(self.n, len(contexts))

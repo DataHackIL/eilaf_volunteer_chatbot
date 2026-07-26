@@ -16,7 +16,7 @@ import time
 from collections.abc import Sequence
 
 from chatbot.rag.documents import Document
-from chatbot.rag.generator._prompt import NO_CONTEXT, SYSTEM, build_user_message
+from chatbot.rag.generator._prompt import NO_CONTEXT, build_system, build_user_message
 from chatbot.rag.generator.base import Generator
 from chatbot.rag.generator.fallback import FallbackGenerator
 
@@ -51,7 +51,6 @@ class GeminiGenerator(Generator):
         self.model = model
         self.max_retries = max_retries
         self._client = None
-        self._config = None
         self.last_usage: dict | None = None
 
     def _get_client(self):
@@ -62,18 +61,20 @@ class GeminiGenerator(Generator):
             self._client = genai.Client()
         return self._client
 
-    def _get_config(self):
-        if self._config is None:
-            from google.genai import types
+    def _build_config(self, language: str):
+        # Built per call: the system instruction is language-dependent, and
+        # constructing the config (once the SDK is imported) is cheap.
+        from google.genai import types
 
-            self._config = types.GenerateContentConfig(
-                system_instruction=SYSTEM,
-                max_output_tokens=_MAX_OUTPUT_TOKENS,
-                temperature=0.0,  # grounded QA — keep it deterministic
-            )
-        return self._config
+        return types.GenerateContentConfig(
+            system_instruction=build_system(language),
+            max_output_tokens=_MAX_OUTPUT_TOKENS,
+            temperature=0.0,  # grounded QA — keep it deterministic
+        )
 
-    def generate(self, query: str, contexts: Sequence[Document]) -> str:
+    def generate(
+        self, query: str, contexts: Sequence[Document], language: str = "Hebrew"
+    ) -> str:
         # No passages retrieved → nothing to ground on; skip the API call.
         if not contexts:
             return NO_CONTEXT
@@ -81,7 +82,7 @@ class GeminiGenerator(Generator):
         from google.genai import errors
 
         client = self._get_client()
-        config = self._get_config()
+        config = self._build_config(language)
         message = build_user_message(query, contexts)
 
         for attempt in range(self.max_retries):

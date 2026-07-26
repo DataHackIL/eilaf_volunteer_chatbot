@@ -15,5 +15,8 @@ from chatbot.rag.generator.base import Generator
 
 
 class ContextEchoGenerator(Generator):
-    def generate(self, query: str, contexts: Sequence[Document]) -> str:
+    def generate(
+        self, query: str, contexts: Sequence[Document], language: str = "Hebrew"
+    ) -> str:
+        # Verbatim passage echo — no phrasing, so ``language`` is ignored.
         return "\n\n---\n\n".join(doc.text for doc in contexts)

@@ -196,9 +196,12 @@ class RAGPipeline:
         context: str | None = DEFAULT_CONTEXT_ANCHOR,
         context_weight: float | None = None,
         sibling_k: int | None = None,
+        language: str = "Hebrew",
     ) -> str:
         return self.generator.generate(
-            query, self.retrieve(query, facts, context, context_weight, sibling_k)
+            query,
+            self.retrieve(query, facts, context, context_weight, sibling_k),
+            language,
         )
 
     def _encode_query(

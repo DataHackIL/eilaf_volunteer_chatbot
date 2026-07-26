@@ -22,6 +22,10 @@ dependencies = [
     "python-dotenv",
     # apps
     "streamlit",
+    # whatsapp front-end (webhook server + outbound Cloud API calls)
+    "fastapi",
+    "uvicorn[standard]",
+    "httpx",
     # speech-to-text
     "faster-whisper",
     "google-genai>=2.12.1",

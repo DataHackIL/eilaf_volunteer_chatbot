@@ -10,5 +10,12 @@ from chatbot.rag.documents import Document
 
 class Generator(ABC):
     @abstractmethod
-    def generate(self, query: str, contexts: Sequence[Document]) -> str:
+    def generate(
+        self, query: str, contexts: Sequence[Document], language: str = "Hebrew"
+    ) -> str:
+        """Answer ``query`` from ``contexts``, replying in ``language``.
+
+        ``language`` is the natural-language name of the answer language
+        ("Hebrew" / "Arabic" / "English"); non-LLM heads may ignore it.
+        """
         raise NotImplementedError

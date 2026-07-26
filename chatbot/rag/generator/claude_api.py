@@ -14,7 +14,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 
 from chatbot.rag.documents import Document
-from chatbot.rag.generator._prompt import NO_CONTEXT, SYSTEM, build_user_message
+from chatbot.rag.generator._prompt import NO_CONTEXT, build_system, build_user_message
 from chatbot.rag.generator.base import Generator
 
 # Centralized so the model tier is a one-line change. Sonnet 5 matches the
@@ -45,7 +45,9 @@ class ClaudeGenerator(Generator):
             self._client = anthropic.Anthropic()
         return self._client
 
-    def generate(self, query: str, contexts: Sequence[Document]) -> str:
+    def generate(
+        self, query: str, contexts: Sequence[Document], language: str = "Hebrew"
+    ) -> str:
         # No passages retrieved → nothing to ground on; skip the API call.
         if not contexts:
             return NO_CONTEXT
@@ -55,7 +57,7 @@ class ClaudeGenerator(Generator):
             model=self.model,
             max_tokens=self.max_tokens,
             thinking={"type": "disabled"},
-            system=SYSTEM,
+            system=build_system(language),
             messages=[{"role": "user", "content": build_user_message(query, contexts)}],
         )
 

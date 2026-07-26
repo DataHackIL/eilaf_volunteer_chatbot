@@ -49,11 +49,13 @@ class FallbackGenerator(Generator):
         self.generators = list(generators)
         self.last_used: int | None = None
 
-    def generate(self, query: str, contexts: Sequence[Document]) -> str:
+    def generate(
+        self, query: str, contexts: Sequence[Document], language: str = "Hebrew"
+    ) -> str:
         last = len(self.generators) - 1
         for i, generator in enumerate(self.generators):
             try:
-                answer = generator.generate(query, contexts)
+                answer = generator.generate(query, contexts, language)
             except Exception as exc:
                 # Non-rate-limit errors, and a rate-limit on the final back-end,
                 # propagate; otherwise move on to the next back-end.

@@ -1,0 +1,36 @@
+# One-command interim deployment: the chatbot server + a public tunnel.
+#
+#   cd app/whatsapp && docker compose up --build
+#   docker compose logs tunnel          # copy the https://…trycloudflare.com URL
+#
+# Put that URL + "/webhook" into the Meta webhook config (see SETUP.md). Secrets
+# come from the repo-root .env at runtime — nothing is baked into the image.
+
+services:
+  chatbot:
+    build:
+      context: ../..                    # repo root (relative to this file's dir)
+      dockerfile: app/whatsapp/Dockerfile
+    env_file: ../../.env                # repo-root .env → WHATSAPP_* / GEMINI_API_KEY
+    ports:
+      - "8000:8000"
+    volumes:
+      - hf-cache:/models                # e5 weights persist across restarts (dev)
+      - ../../data/static:/app/data/static  # corpus + embedding cache, bind-mounted
+    restart: unless-stopped
+
+  tunnel:
+    image: cloudflare/cloudflared:latest
+    command: tunnel --no-autoupdate --url http://chatbot:8000
+    depends_on:
+      - chatbot
+    restart: unless-stopped
+    # For a STABLE URL (survives restarts, register the webhook once) instead of
+    # a random trycloudflare.com hostname: create a named tunnel in the Cloudflare
+    # dashboard and run it with its token —
+    #   command: tunnel --no-autoupdate run
+    #   environment:
+    #     - TUNNEL_TOKEN=${TUNNEL_TOKEN}
+
+volumes:
+  hf-cache:

@@ -27,6 +27,15 @@ class Language(Enum):
         }[self]
 
     @property
+    def prompt_name(self) -> str:
+        """English name of the language, for the generator's answer-language prompt."""
+        return {
+            Language.HEBREW: "Hebrew",
+            Language.ARABIC: "Arabic",
+            Language.ENGLISH: "English",
+        }[self]
+
+    @property
     def is_rtl(self) -> bool:
         return self in (Language.HEBREW, Language.ARABIC)
 
@@ -57,6 +66,10 @@ class HebrewText(Enum):
     GEN_GEMINI = "Gemini (חינמי, רוטציית מודלים)"
     GEN_CEREBRAS = "Cerebras (חינמי)"
     GENERATOR_ERROR = "יצירת התשובה נכשלה: {error}"
+    # WhatsApp conversation flow.
+    SKIP = "דלג"
+    ASK_ANOTHER = "אפשר לשאול שאלה נוספת 🙂"
+    INVALID_AGE = "נא להזין גיל תקין (מספר), או ללחוץ על דילוג."
 
 
 class ArabicText(Enum):
@@ -86,6 +99,10 @@ class ArabicText(Enum):
     GEN_GEMINI = "Gemini (مجاني، تدوير موديلات)"
     GEN_CEREBRAS = "Cerebras (مجاني)"
     GENERATOR_ERROR = "فشل توليد الجواب: {error}"
+    # WhatsApp conversation flow.
+    SKIP = "تخطّي"
+    ASK_ANOTHER = "فيكم تسألوا سؤال تاني 🙂"
+    INVALID_AGE = "لطفاً دخّلوا عمر صحيح (رقم)، أو اضغطوا تخطّي."
 
 
 class EnglishText(Enum):
@@ -114,6 +131,10 @@ class EnglishText(Enum):
     GEN_GEMINI = "Gemini (free, model rotation)"
     GEN_CEREBRAS = "Cerebras (free)"
     GENERATOR_ERROR = "Answer generation failed: {error}"
+    # WhatsApp conversation flow.
+    SKIP = "Skip"
+    ASK_ANOTHER = "You can ask another question 🙂"
+    INVALID_AGE = "Please enter a valid age (a number), or tap Skip."
 
 
 TEXTS: dict[Language, type[Enum]] = {

@@ -1,0 +1,19 @@
+# Build context is the repo root; keep the image small and reproducible.
+.git
+.venv
+**/__pycache__
+**/*.pyc
+.pytest_cache
+.ruff_cache
+
+# Secrets never enter the image — injected at runtime via --env-file.
+.env
+
+# Corpus + embedding cache are bind-mounted at runtime (dev choice), not baked.
+data/static
+
+# Dev-only assets.
+data/scraping
+data/raw
+*.ipynb
+.agents

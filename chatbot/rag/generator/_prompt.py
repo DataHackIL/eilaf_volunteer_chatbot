@@ -13,18 +13,23 @@ from collections.abc import Sequence
 
 from chatbot.rag.documents import Document
 
+
 # Meta-instruction is English (matches the rest of the codebase's prompts) but
-# pins the *answer* language to Hebrew and forbids ungrounded content — the
-# retrieval corpus is the only source of truth for a rights/benefits answer.
-SYSTEM = (
-    "You are a helpful assistant for an Israeli volunteer organisation, "
-    "answering questions about rights and benefits.\n"
-    "Answer the user's question in Hebrew, using only the information in the "
-    "numbered sources provided. If the sources do not contain the answer, say "
-    "so plainly in Hebrew and do not invent details, eligibility rules, or "
-    "numbers. Keep the answer concise, and cite the passage number(s) you "
-    "relied on in square brackets, e.g. [2]."
-)
+# pins the *answer* language and forbids ungrounded content — the retrieval
+# corpus is the only source of truth for a rights/benefits answer. The answer
+# language is a parameter (Hebrew by default) so a multilingual front-end can
+# reply in the user's chosen language; the corpus and citations stay unchanged.
+def build_system(language: str = "Hebrew") -> str:
+    """The grounding system instruction, phrased to answer in ``language``."""
+    return (
+        "You are a helpful assistant for an Israeli volunteer organisation, "
+        "answering questions about rights and benefits.\n"
+        f"Answer the user's question in {language}, using only the information in "
+        "the numbered sources provided. If the sources do not contain the answer, "
+        f"say so plainly in {language} and do not invent details, eligibility "
+        "rules, or numbers. Keep the answer concise, and cite the passage "
+        "number(s) you relied on in square brackets, e.g. [2]."
+    )
 
 # Returned directly (no API call) when retrieval produced nothing to ground on.
 NO_CONTEXT = "לא נמצא מידע רלוונטי לשאלה במאגר."

@@ -1,0 +1,24 @@
+# One-command local run of the Streamlit visualizer:
+#
+#   cd app/visualizer && docker compose up --build
+#   # then open http://localhost:8501
+#
+# Secrets come from the repo-root .env at runtime — nothing is baked into the
+# image. The corpus + embedding cache are bind-mounted from data/static, and the
+# e5 model weights download once into a named volume that survives restarts.
+
+services:
+  visualizer:
+    build:
+      context: ../..                    # repo root (relative to this file's dir)
+      dockerfile: app/visualizer/Dockerfile
+    env_file: ../../.env                # repo-root .env → GEMINI_API_KEY / CEREBRAS_API_KEY
+    ports:
+      - "8501:8501"
+    volumes:
+      - hf-cache:/models                # e5 weights persist across restarts (dev)
+      - ../../data/static:/app/data/static  # corpus + embedding cache, bind-mounted
+    restart: unless-stopped
+
+volumes:
+  hf-cache:

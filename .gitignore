@@ -1,5 +1,6 @@
 # Hidden folders
 .claude/
+.agents/
 .venv/
 .env/
 .idea/
@@ -37,3 +38,4 @@ data/static/**/*.json
 
 # Cached corpus embeddings (regenerated on demand)
 data/static/**/.embeddings/
+

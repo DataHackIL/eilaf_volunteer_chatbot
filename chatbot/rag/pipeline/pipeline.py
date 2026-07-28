@@ -21,6 +21,7 @@ from chatbot.rag.embedder import E5Embedder, Embedder
 from chatbot.rag.filters import MetadataFilter, SoftMetadataFilter
 from chatbot.rag.generator import ContextEchoGenerator, Generator
 from chatbot.rag.pipeline.embedding_cache import load_or_encode
+from chatbot.rag.reranker import BM25Reranker, Reranker
 
 # A short domain "anchor" prepended to the query in embedding space. The corpus
 # is single-domain (violence-victim material), so this doesn't discriminate
@@ -48,7 +49,9 @@ class RAGPipeline:
         embedder: Embedder,
         generator: Generator,
         metadata_filter: MetadataFilter | None = None,
+        reranker: Reranker | None = None,
         top_k: int = 5,
+        candidate_k: int = 20,
         sibling_k: int = 3,
         context_weight: float = DEFAULT_CONTEXT_WEIGHT,
         cache_dir: str | Path | None = None,
@@ -57,7 +60,15 @@ class RAGPipeline:
         self.embedder = embedder
         self.generator = generator
         self.metadata_filter = metadata_filter or SoftMetadataFilter()
+        # Optional second-stage lexical reranker. When set, the embedder's
+        # ``candidate_k`` nearest chunks are re-ordered by the reranker and the
+        # top-k of *that* become the matches; when None, retrieval is pure
+        # embedder ranking (behaviour unchanged). ``candidate_k`` is the pool the
+        # reranker sees — it only matters when a reranker is set, and clamps to
+        # ``top_k`` if set smaller.
+        self.reranker = reranker
         self.top_k = top_k
+        self.candidate_k = max(candidate_k, top_k)
         self.sibling_k = sibling_k
         self.context_weight = context_weight
         # Index by id so retrieval can reattach a matched node's parent. Ids are
@@ -95,9 +106,16 @@ class RAGPipeline:
         Retrieves the nearest-neighbour passages to the query and echoes them.
         Swap in ``RandomEmbedder`` / ``RandomPassagesGenerator`` for a no-download
         smoke test, or a real LLM generator once a provider is chosen.
+
+        A BM25 lexical reranker is fitted on the loaded corpus and wired in by
+        default (the caller may override with ``reranker=None`` for pure embedder
+        ranking, or pass their own). It re-orders the embedder's candidate pool
+        so exact-term matches surface; fitting is cheap (in-memory token counts).
         """
+        documents = load_documents(static_dir)
+        kwargs.setdefault("reranker", BM25Reranker(documents))
         return cls(
-            documents=load_documents(static_dir),
+            documents=documents,
             embedder=E5Embedder(),
             generator=ContextEchoGenerator(),
             # Persist embeddings in a subdir (not matched by the loader's
@@ -147,11 +165,7 @@ class RAGPipeline:
         if not self.documents:
             return []
         n_sib = self.sibling_k if sibling_k is None else sibling_k
-        query_vec = self._encode_query(query, context, context_weight)
-        sims = self._cosine(self._embeddings, query_vec)
-        if facts:
-            sims = sims + self.metadata_filter.adjust(self.documents, facts)
-        top_idx = np.argsort(-sims)[: self.top_k]
+        top_idx, sims = self._match_indices(query, facts, context, context_weight)
 
         results: list[Document] = []
         seen: set[str] = set()
@@ -173,6 +187,51 @@ class RAGPipeline:
             if parent is not None:
                 add(parent)
         return results
+
+    def _match_indices(
+        self,
+        query: str,
+        facts: dict | None,
+        context: str | None,
+        context_weight: float | None,
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """The top-k match indices and the full embedder similarity vector.
+
+        Embedder similarity (metadata-adjusted) ranks the corpus; the returned
+        ``sims`` drives the later sibling ranking either way. Without a reranker
+        the matches are the top-k of that ranking. With one, the embedder's
+        ``candidate_k`` nearest are handed to the reranker and its top-k become
+        the matches — a lexical second stage over a semantic shortlist. Siblings
+        stay ranked by ``sims`` (embedder similarity), not the reranker.
+        """
+        query_vec = self._encode_query(query, context, context_weight)
+        sims = self._cosine(self._embeddings, query_vec)
+        if facts:
+            sims = sims + self.metadata_filter.adjust(self.documents, facts)
+        ranked = np.argsort(-sims)
+        if self.reranker is None:
+            return ranked[: self.top_k], sims
+        candidates = ranked[: self.candidate_k]
+        rr = self.reranker.score(query, [self.documents[i] for i in candidates])
+        top_idx = candidates[np.argsort(-rr)][: self.top_k]
+        return top_idx, sims
+
+    def matches(
+        self,
+        query: str,
+        facts: dict | None = None,
+        context: str | None = DEFAULT_CONTEXT_ANCHOR,
+        context_weight: float | None = None,
+    ) -> list[Document]:
+        """The ranked top-k match Documents, without sibling/parent expansion.
+
+        This is the pipeline's core retrieval output — what a precision gauge
+        should score — before :meth:`retrieve` pads it with structural context.
+        """
+        if not self.documents:
+            return []
+        top_idx, _ = self._match_indices(query, facts, context, context_weight)
+        return [self.documents[i] for i in top_idx]
 
     def _nearest_siblings(
         self, idx: int, parent_id: str | None, sims: np.ndarray, k: int

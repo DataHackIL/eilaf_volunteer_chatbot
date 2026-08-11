@@ -1,12 +1,17 @@
 import json
-from urllib.parse import unquote
+from urllib.parse import unquote, urlsplit
 
 import requests
 from bs4 import BeautifulSoup, Tag
 
 from data.scraping.base import BaseHTMLScraper
 
-API_ENDPOINT = "https://www.kolzchut.org.il/w/api.php"
+# KolZchut runs one wiki per language, each with its own script path: a
+# /he/<page> article is served by /w/he/api.php (there is no shared /w/api.php).
+# Deriving the endpoint from the URL's language segment keeps Arabic pages
+# (/ar/<page>) working through the same class.
+API_PATH_TEMPLATE = "{scheme}://{netloc}/w/{lang}/api.php"
+DEFAULT_LANG = "he"
 
 # Chrome / navigation / transient site-notice blocks that are not article
 # content; removed wholesale before the section tree is built.
@@ -51,6 +56,15 @@ class KolZchutScraper(BaseHTMLScraper):
         slug = self.target_url.rstrip("/").rsplit("/", 1)[-1]
         return unquote(slug)
 
+    def _api_endpoint(self) -> str:
+        """API endpoint of the language wiki that serves the target URL."""
+        parts = urlsplit(self.target_url)
+        segments = [seg for seg in parts.path.split("/") if seg]
+        lang = segments[0] if len(segments) > 1 else DEFAULT_LANG
+        return API_PATH_TEMPLATE.format(
+            scheme=parts.scheme, netloc=parts.netloc, lang=lang
+        )
+
     def scrape(self) -> str:
         """Fetch the parsed article from the MediaWiki API as raw JSON text."""
         headers = {"User-Agent": "EilafVolunteerBot/0.1 (RAG ingest)"}
@@ -61,7 +75,7 @@ class KolZchutScraper(BaseHTMLScraper):
             "format": "json",
             "formatversion": "2",
         }
-        response = requests.get(API_ENDPOINT, params=params, headers=headers)
+        response = requests.get(self._api_endpoint(), params=params, headers=headers)
         response.raise_for_status()
         return response.text
 

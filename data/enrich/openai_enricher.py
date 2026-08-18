@@ -3,8 +3,10 @@
 A drop-in sibling of :class:`~data.enrich.claude_enricher.ClaudeSegmentEnricher`
 and :class:`~data.enrich.gemini_enricher.GeminiSegmentEnricher` for any provider
 that exposes an OpenAI-style ``/chat/completions`` endpoint. Defaults to
-**Cerebras** — a generous free daily quota (~14k requests/day, far above Gemini's
-free tier) — running ``gpt-oss-120b``.
+**Cerebras** running ``gpt-oss-120b``. Its free tier was once ~14k requests/day
+(far above Gemini's), but as of 2026-08-18 this account's key answers every
+request with ``402 payment_required``, so treat the free quota as gone until
+billing is set up — ``--provider gemini`` is the working free path.
 
 Like the Gemini free tier there's no Batches API, so segments are sent one
 request at a time. The same annotation spec is reused (``_SYSTEM`` +
@@ -35,8 +37,9 @@ from data.enrich.base import SegmentAnnotation, SegmentEnricher, Track
 # annotates against one prompt; only the transport differs.
 from data.enrich.claude_enricher import _SYSTEM
 
-# Cerebras defaults (generous free daily quota, fast). Groq/OpenRouter are a
-# one-line swap; the live catalogue is at inference-docs.cerebras.ai/models.
+# Cerebras defaults (fast; see the module docstring on its quota). Groq /
+# OpenRouter are a one-line swap and are the route to try if Cerebras stays
+# behind billing; the live catalogue is at inference-docs.cerebras.ai/models.
 BASE_URL = "https://api.cerebras.ai/v1"
 KEY_ENV = "CEREBRAS_API_KEY"
 MODEL = "gpt-oss-120b"

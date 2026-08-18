@@ -85,9 +85,14 @@ def _root_meta(data: dict) -> dict:
     dataset-level tag: national sources omit it (unconstrained); a municipal
     dataset sets it once on the root and it inherits down to every segment via
     :func:`_node_meta`, so the metadata filter can restrict it to that locality.
+
+    ``track`` works the same way for sources devoted to one compensation track
+    (hostile acts, road accidents…), where per-segment inference is unreliable —
+    an isolated sentence about a monthly allowance names no track, but the page
+    it came from does. The enricher may still override it per segment.
     """
     meta = {}
-    for key in ("type", "area", "locality"):
+    for key in ("type", "area", "locality", "track"):
         value = (data.get(key) or "").strip()
         if value:
             meta[key] = value

@@ -52,6 +52,7 @@ run with; edit that list to add sources.
 ```bash
 python -m data.scraping.nevo         # Israeli law texts (modern + legacy templates)
 python -m data.scraping.kol_zchut    # KolZchut rights pages, via the MediaWiki API
+python -m data.scraping.gov_il       # gov.il guides and information pages, via its content API
 python -m data.scraping.docx_source  # local .docx drafts → the same section-tree JSON
 ```
 
@@ -59,15 +60,37 @@ Output is one JSON section tree per source in `data/static/raw/`, named after
 the URL. `docx_source` globs a local folder — point it at your own path before
 running.
 
+> **gov.il:** the site is a single-page app behind Cloudflare bot management —
+> its HTML is an empty shell and the request is refused on its TLS fingerprint,
+> so there is nothing to scrape. `gov_il.py` instead calls the content API the
+> site's own front end uses, on a host that is not behind Cloudflare. Requests
+> need both an `x-client-id` and an `Origin: https://www.gov.il` header; without
+> `Origin` the gateway answers `500 RF-OriginError`, which looks like a server
+> fault rather than a rejected request. gov.il publishes no sitemap, so
+> `list_pages()` in that module discovers page URLs from a topic or office
+> landing page.
+
 > **Time:** one HTTP request per page, so this is fast — measured **0.4–1.2 s
 > per page** (the largest legacy nevo law is the slow end), i.e. a few seconds
 > for the whole current source list. Adding many pages scales linearly.
 
 ### 2. Enrich
 
-Every text segment gets a `useful` flag plus age/gender tags, via an LLM.
+Every text segment gets a `useful` flag plus age/gender/track tags, via an LLM.
 Re-runs reuse the previous enriched copy and reject obvious junk by rule, so
 only new or changed segments are ever billed.
+
+`track` marks content belonging to a separate compensation track — hostile
+acts, military bereavement, road or work accidents — which Israeli law routes
+through its own authorities and eligibility tests. That material reads like
+ordinary victim support, so without the tag retrieval offers it for the
+neighbourhood-violence questions this bot exists to answer, and the entitlements
+do not carry over. It is the one axis that penalises on a *missing* fact: a
+tagged chunk is off-track until a user fact affirms it. A source devoted
+entirely to one track can also stamp `track` on its tree root (see
+`_HOSTILE_ACTS` in `data/scraping/gov_il.py`), which the loader inherits down to
+every segment — per-segment inference cannot catch a lone sentence like "the
+allowance is paid monthly", but the page it came from knows.
 
 ```bash
 python -m data.enrich --dry-run                    # count what would be sent; calls nothing

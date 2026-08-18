@@ -65,9 +65,20 @@ running.
 
 ### 2. Enrich
 
-Every text segment gets a `useful` flag plus age/gender tags, via an LLM.
+Every text segment gets a `useful` flag plus age/gender/track tags, via an LLM.
 Re-runs reuse the previous enriched copy and reject obvious junk by rule, so
 only new or changed segments are ever billed.
+
+`track` marks content belonging to a separate compensation track — hostile
+acts, military bereavement, road or work accidents — which Israeli law routes
+through its own authorities and eligibility tests. That material reads like
+ordinary victim support, so without the tag retrieval offers it for the
+neighbourhood-violence questions this bot exists to answer, and the entitlements
+do not carry over. It is the one axis that penalises on a *missing* fact: a
+tagged chunk is off-track until a user fact affirms it. A source devoted
+entirely to one track can also set `track` on its tree root, which the loader
+inherits down to every segment — per-segment inference cannot catch a lone
+sentence like "the allowance is paid monthly", but the page it came from knows.
 
 ```bash
 python -m data.enrich --dry-run                    # count what would be sent; calls nothing

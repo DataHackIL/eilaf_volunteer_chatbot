@@ -18,8 +18,9 @@ from __future__ import annotations
 import json
 import time
 from collections.abc import Sequence
+from typing import get_args
 
-from data.enrich.base import SegmentAnnotation, SegmentEnricher
+from data.enrich.base import SegmentAnnotation, SegmentEnricher, Track
 
 # Reuse the exact prompt from the Claude enricher so both back-ends classify
 # against one spec; only the transport differs.
@@ -55,9 +56,12 @@ def _annotation_schema():
             "gender": types.Schema(
                 type=types.Type.STRING, enum=["m", "f"], nullable=True
             ),
+            "track": types.Schema(
+                type=types.Type.STRING, enum=list(get_args(Track)), nullable=True
+            ),
             "useful": types.Schema(type=types.Type.BOOLEAN),
         },
-        required=["min_age", "max_age", "gender", "useful"],
+        required=["min_age", "max_age", "gender", "track", "useful"],
     )
 
 

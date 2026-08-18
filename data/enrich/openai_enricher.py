@@ -27,8 +27,9 @@ from __future__ import annotations
 import json
 import os
 from collections.abc import Sequence
+from typing import get_args
 
-from data.enrich.base import SegmentAnnotation, SegmentEnricher
+from data.enrich.base import SegmentAnnotation, SegmentEnricher, Track
 
 # Reuse the exact classification spec from the Claude enricher so every back-end
 # annotates against one prompt; only the transport differs.
@@ -50,7 +51,9 @@ _MAX_RETRIES = 5
 _JSON_INSTRUCTION = (
     "\n\nRespond with a single JSON object and nothing else, with exactly these "
     'keys: "useful" (boolean), "min_age" (integer or null), "max_age" (integer '
-    'or null), "gender" ("m", "f", or null).'
+    'or null), "gender" ("m", "f", or null), "track" ('
+    + ", ".join(f'"{value}"' for value in get_args(Track))
+    + ", or null)."
 )
 _SYSTEM_JSON = _SYSTEM + _JSON_INSTRUCTION
 

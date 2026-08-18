@@ -90,6 +90,11 @@ python -m data.enrich --provider claude --limit 500  # budgeted LLM run
 `gemini` (Google AI free tier), or `cerebras`. Neither back-end has a spend
 cap, hence `--dry-run` / `--limit N` — always dry-run first.
 
+`gemini` is the working free back-end. `cerebras` was the bulk option on its
+free tier, but as of 2026-08-18 the key returns `402 payment_required` on every
+call, so it needs billing (or a swap to Groq/OpenRouter — a one-line change in
+`openai_enricher.py`) before it can carry the ~10k nevo backlog.
+
 A segment the back-end fails on is left un-annotated and stays pending, so a
 later run retries it; the run ends with a loud `WARNING: N segments failed` if
 any did. Watch for that — a run can otherwise exit 0 having answered nothing,

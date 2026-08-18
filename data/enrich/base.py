@@ -45,15 +45,22 @@ class SegmentAnnotation(BaseModel):
     gender: Literal["m", "f"] | None = None
     track: Track | None = None
 
+    # False when the back-end never produced an answer for this segment (a dead
+    # model, an exhausted quota, a malformed reply). Transport state, not an
+    # annotation: the caller must leave such a node un-annotated so a later run
+    # retries it. Recording the defaults instead would look identical to a
+    # genuine "useful, no constraints" verdict and would never be revisited.
+    ok: bool = True
+
     def tags(self) -> dict:
-        """The group tags only (no ``useful``), dropping ``None`` values.
+        """The group tags only (no ``useful``/``ok``), dropping ``None`` values.
 
         This is exactly what gets stored under a node's ``meta`` and read back by
         the loader / metadata filter — absent keys mean unconstrained.
         """
         return {
             key: value
-            for key, value in self.model_dump(exclude={"useful"}).items()
+            for key, value in self.model_dump(exclude={"useful", "ok"}).items()
             if value is not None
         }
 

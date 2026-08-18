@@ -90,6 +90,14 @@ python -m data.enrich --provider claude --limit 500  # budgeted LLM run
 `gemini` (Google AI free tier), or `cerebras`. Neither back-end has a spend
 cap, hence `--dry-run` / `--limit N` — always dry-run first.
 
+A segment the back-end fails on is left un-annotated and stays pending, so a
+later run retries it; the run ends with a loud `WARNING: N segments failed` if
+any did. Watch for that — a run can otherwise exit 0 having answered nothing,
+which is exactly what a retired model name does. Google retires Gemini models
+often, so if `--provider gemini` starts reporting model errors, check
+`ROTATION_MODELS` in `data/enrich/gemini_enricher.py` against
+`client.models.list()`.
+
 > **Time:** `--dry-run` and `--no-llm` are seconds (pure local work). The LLM
 > pass is the long one: the current raw corpus has **~10,000 segments still
 > pending**. `claude` submits them as a batch and polls every 30 s — typically

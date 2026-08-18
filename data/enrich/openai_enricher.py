@@ -9,8 +9,8 @@ free tier) — running ``gpt-oss-120b``.
 Like the Gemini free tier there's no Batches API, so segments are sent one
 request at a time. The same annotation spec is reused (``_SYSTEM`` +
 ``SegmentAnnotation``); JSON is requested via ``response_format`` and validated
-with pydantic, so a malformed reply keeps the segment (useful, untagged) rather
-than dropping it. The ``openai`` SDK is imported lazily so the rest of
+with pydantic, so a malformed reply defers the segment to a later run rather
+than recording a guess. The ``openai`` SDK is imported lazily so the rest of
 ``data.enrich`` stays usable without the SDK or a key.
 
 Other free providers are a one-line construction change, e.g.::
@@ -96,11 +96,11 @@ class OpenAICompatibleSegmentEnricher(SegmentEnricher):
         return self._client
 
     def _annotate_one(self, segment: str) -> tuple[SegmentAnnotation, int, int]:
-        """Annotate a single segment; keep it untagged on any API error.
+        """Annotate a single segment; defer it on any API error.
 
         Returns ``(annotation, input_tokens, output_tokens)``. The SDK retries
-        rate limits internally; a persistent failure keeps the segment (useful,
-        untagged) so content is never silently dropped.
+        rate limits internally; a persistent failure marks the segment
+        ``ok=False``, leaving it un-annotated for a later run to retry.
         """
         from openai import OpenAIError
 
@@ -117,8 +117,8 @@ class OpenAICompatibleSegmentEnricher(SegmentEnricher):
                 ],
             )
         except OpenAIError as exc:
-            print(f"  openai: request failed ({exc}); keeping segment untagged")
-            return SegmentAnnotation(), 0, 0
+            print(f"  openai: request failed ({exc}); segment deferred")
+            return SegmentAnnotation(ok=False), 0, 0
 
         usage = response.usage
         in_tok = getattr(usage, "prompt_tokens", 0) or 0
@@ -154,9 +154,11 @@ class OpenAICompatibleSegmentEnricher(SegmentEnricher):
 
     @staticmethod
     def _parse_text(text: str | None) -> SegmentAnnotation:
+        # A blocked/empty/malformed reply is a failed attempt, not a verdict:
+        # defer it (``ok=False``) so a later run asks again.
         if not text:
-            return SegmentAnnotation()  # keep on empty/blocked response
+            return SegmentAnnotation(ok=False)
         try:
             return SegmentAnnotation.model_validate_json(text)
         except (ValueError, json.JSONDecodeError):
-            return SegmentAnnotation()
+            return SegmentAnnotation(ok=False)

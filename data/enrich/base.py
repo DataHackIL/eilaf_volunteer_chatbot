@@ -27,8 +27,8 @@ class SegmentAnnotation(BaseModel):
     causes a chunk to be filtered out.
 
     ``track`` is annotated per segment *and* settable dataset-wide: a source
-    that is entirely about one track (e.g. gov.il's hostile-acts guides) stamps
-    it on the tree root, and the loader inherits it down to every segment — a
+    that is entirely about one track (a hostile-acts guide, say) stamps it on
+    the tree root, and the loader inherits it down to every segment — a
     per-segment value, when the enricher finds one, overrides it. That matters
     because a lone sentence like "the allowance is paid monthly" carries no
     signal on its own; only the page it came from knows which track it is on.

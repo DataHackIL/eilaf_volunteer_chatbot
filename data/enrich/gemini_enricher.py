@@ -29,13 +29,28 @@ from data.enrich.claude_enricher import _SYSTEM
 # Primary model + the fall-over rotation. Each free-tier model has its own
 # per-day quota, so rotating on a 429 (see _annotate_one) multiplies the daily
 # budget for a bulk run. Ordered primary-first.
-MODEL = "gemini-3-flash-preview"
-ROTATION_MODELS = (MODEL, "gemini-2.5-flash", "gemini-2.0-flash")
+#
+# Google retires these faster than this repo gets touched, and a retired name
+# fails every call rather than rotating past it (see _annotate_one's 404 branch),
+# so re-check the list against ``client.models.list()`` if a bulk run starts
+# reporting model errors. ``gemini-3.7-flash`` is the newest flash tier but was
+# answering 503 "high demand" when this rotation was last verified.
+MODEL = "gemini-3.6-flash"
+ROTATION_MODELS = (
+    MODEL,
+    "gemini-3.5-flash",
+    "gemini-2.5-flash",
+    "gemini-3-flash-preview",
+)
 
 # Only when *every* model is rate-limited in one pass do we back off (the cap may
 # be per-minute) and retry the whole rotation, rather than dropping the segment.
 _MAX_RETRIES = 5
 _BACKOFF_SECONDS = 20
+
+# Status codes worth trying another model for: the quota is per-model, and an
+# overloaded tier usually has a healthy sibling.
+_ROTATE_CODES = (429, 503)
 
 
 def _annotation_schema():
@@ -105,34 +120,56 @@ class GeminiSegmentEnricher(SegmentEnricher):
             )
         return self._config
 
+    def _drop_model(self, model: str) -> None:
+        """Retire a model name the API no longer serves, for this run.
+
+        A 404 is permanent, and the model index is sticky — so leaving a dead
+        name in the rotation makes every later segment fail on it. Dropping it
+        keeps the run alive on the models that do work.
+        """
+        self.models.remove(model)
+        self._model_idx = 0
+        print(f"  gemini: {model} is no longer served; dropped from the rotation")
+        if not self.models:
+            raise RuntimeError(
+                "gemini: no usable models left in the rotation. Update "
+                "ROTATION_MODELS in data/enrich/gemini_enricher.py against "
+                "client.models.list()."
+            )
+
     def _annotate_one(self, segment: str) -> tuple[SegmentAnnotation, int, int]:
         """Annotate a single segment, rotating models on rate limits.
 
-        Returns ``(annotation, input_tokens, output_tokens)``. A 429 rotates to
-        the next model (each has its own per-day quota); only when every model is
-        rate-limited in one pass do we back off and retry the rotation. On a
-        non-rate-limit error, or after exhausting the backoff cycles, keeps the
-        segment (useful, untagged) so content is never silently dropped.
+        Returns ``(annotation, input_tokens, output_tokens)``. A 429 or 503
+        rotates to the next model (each has its own per-day quota); only when
+        every model is exhausted in one pass do we back off and retry the
+        rotation. A 404 means the name was retired, so it leaves the rotation
+        entirely. Any other error marks the segment *not annotated*
+        (``ok=False``), which defers it to a later run rather than recording a
+        guess as the final answer.
         """
         from google.genai import errors
 
         client = self._get_client()
         config = self._get_config()
-        n = len(self.models)
         for cycle in range(self.max_retries):
-            for _ in range(n):  # try each model once before backing off
+            for _ in range(len(self.models)):  # try each model before backing off
                 model = self.models[self._model_idx]
                 try:
                     response = client.models.generate_content(
                         model=model, contents=segment, config=config
                     )
                 except errors.APIError as exc:
-                    if getattr(exc, "code", None) != 429:
-                        # Rotating or waiting won't fix a non-rate-limit error.
-                        print(f"  gemini: request failed ({exc}); keeping segment untagged")
-                        return SegmentAnnotation(), 0, 0
-                    # Rate limited: advance to the next model (sticky).
-                    self._model_idx = (self._model_idx + 1) % n
+                    code = getattr(exc, "code", None)
+                    if code == 404:
+                        self._drop_model(model)
+                        continue
+                    if code not in _ROTATE_CODES:
+                        # Rotating or waiting won't fix this one.
+                        print(f"  gemini: request failed ({exc}); segment deferred")
+                        return SegmentAnnotation(ok=False), 0, 0
+                    # Rate limited / overloaded: advance to the next model (sticky).
+                    self._model_idx = (self._model_idx + 1) % len(self.models)
                     continue
 
                 usage = response.usage_metadata
@@ -144,10 +181,11 @@ class GeminiSegmentEnricher(SegmentEnricher):
             # so wait and retry the whole rotation (unless we're out of cycles).
             if cycle < self.max_retries - 1:
                 wait = _BACKOFF_SECONDS * (cycle + 1)
-                print(f"  gemini: all {n} models rate limited, waiting {wait}s")
+                print(f"  gemini: all {len(self.models)} models exhausted, waiting {wait}s")
                 time.sleep(wait)
 
-        return SegmentAnnotation(), 0, 0
+        # Out of cycles: defer rather than bank an un-annotated guess as final.
+        return SegmentAnnotation(ok=False), 0, 0
 
     def enrich(self, segments: Sequence[str]) -> list[SegmentAnnotation]:
         segments = list(segments)
@@ -178,9 +216,11 @@ class GeminiSegmentEnricher(SegmentEnricher):
 
     @staticmethod
     def _parse_text(text: str | None) -> SegmentAnnotation:
+        # A blocked/empty/malformed reply is a failed attempt, not a verdict:
+        # defer it (``ok=False``) so a later run asks again.
         if not text:
-            return SegmentAnnotation()  # keep on empty/blocked response
+            return SegmentAnnotation(ok=False)
         try:
             return SegmentAnnotation.model_validate_json(text)
         except (ValueError, json.JSONDecodeError):
-            return SegmentAnnotation()
+            return SegmentAnnotation(ok=False)

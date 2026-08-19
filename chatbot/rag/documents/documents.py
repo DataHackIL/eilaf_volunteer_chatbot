@@ -6,11 +6,16 @@ Files in the enriched store (``data/static/enriched/``) are read and returned as
   text-bearing node, prefixed with its heading breadcrumb for context.
 - ``.docx`` → one Document per non-empty paragraph (a "phrase").
 - ``.pdf`` / ``.txt`` → text split into paragraph-packed chunks.
+
+Whatever the format, no chunk exceeds ``max_chars``: the embedder truncates
+silently at its context window, so an over-long chunk would lose its tail with
+no error and that text could never be retrieved.
 """
 
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -19,6 +24,12 @@ from docx import Document as DocxDocument
 
 # Joins a node's ancestor headings into the breadcrumb prefixed to each chunk.
 _CRUMB = " › "
+# Sentence boundary for over-long text. A colon counts: Hebrew rights prose
+# routinely introduces a list with one, and it is a cleaner cut than mid-clause.
+_SENTENCE_END = re.compile(r"(?<=[.!?:])\s+")
+# Separates a split piece's index from the node id it came from, so the pieces of
+# one node stay distinguishable while remaining traceable to it.
+_PIECE = "~"
 
 
 @dataclass
@@ -69,10 +80,74 @@ def _chunk(text: str, max_chars: int) -> list[str]:
     chunks: list[str] = []
     buf = ""
     for paragraph in paragraphs:
-        if buf and len(buf) + len(paragraph) + 1 > max_chars:
+        # A single paragraph can exceed the budget on its own; break it at finer
+        # boundaries rather than emitting an over-long chunk.
+        for piece in _split_text(paragraph, max_chars):
+            if buf and len(buf) + len(piece) + 1 > max_chars:
+                chunks.append(buf)
+                buf = ""
+            buf = f"{buf}\n{piece}".strip()
+    if buf:
+        chunks.append(buf)
+    return chunks
+
+
+def _units(text: str) -> list[str]:
+    """``text`` broken at the coarsest boundary that actually divides it.
+
+    Lines first (list items and stacked paragraphs in a section-tree node are
+    newline-joined), then sentences, then words. Returning a single element means
+    nothing finer was found, which is how :func:`_split_text` knows to stop.
+    """
+    for separator in ("\n", _SENTENCE_END, " "):
+        parts = (
+            text.split(separator)
+            if isinstance(separator, str)
+            else separator.split(text)
+        )
+        parts = [part.strip() for part in parts if part.strip()]
+        if len(parts) > 1:
+            return parts
+    return [text]
+
+
+def _split_text(text: str, max_chars: int) -> list[str]:
+    """Break ``text`` into pieces of at most ``max_chars``, on natural boundaries.
+
+    The counterpart to the ``merge_chars`` rollup: that coalesces nodes too small
+    to stand alone, this divides ones too big to embed. Without it an over-long
+    node is silently truncated at the embedder's context window — e5's is 512
+    tokens — so its tail is never embedded and cannot be retrieved at all.
+
+    Pieces are packed greedily so each is as full as the budget allows, and split
+    at the coarsest boundary available (line → sentence → word) to keep sentences
+    intact. A single unbreakable run longer than ``max_chars`` is returned whole
+    rather than cut mid-word; that is rare and still better than a hard slice.
+    """
+    text = (text or "").strip()
+    if not text:
+        return []
+    if max_chars <= 0 or len(text) <= max_chars:
+        return [text]
+    units = _units(text)
+    if len(units) == 1:
+        return [text]  # nothing finer to break on
+
+    chunks: list[str] = []
+    buf = ""
+    for unit in units:
+        if len(unit) > max_chars:
+            # Still over budget at this granularity — recurse into finer breaks.
+            if buf:
+                chunks.append(buf)
+                buf = ""
+            chunks.extend(_split_text(unit, max_chars))
+            continue
+        if buf and len(buf) + len(unit) + 1 > max_chars:
             chunks.append(buf)
-            buf = ""
-        buf = f"{buf}\n{paragraph}".strip()
+            buf = unit
+        else:
+            buf = f"{buf}\n{unit}" if buf else unit
     if buf:
         chunks.append(buf)
     return chunks
@@ -114,7 +189,9 @@ def _node_meta(node: dict, parent_meta: dict) -> dict:
     return meta
 
 
-def _flatten_json_tree(data: dict, source: str, merge_chars: int = 0) -> list[Document]:
+def _flatten_json_tree(
+    data: dict, source: str, merge_chars: int = 0, max_chars: int = 0
+) -> list[Document]:
     """Flatten a scraper section-tree into heading-prefixed Documents.
 
     Handles both scraper schemas: nevo nodes carry a ``marker`` (e.g. "6."),
@@ -166,19 +243,29 @@ def _flatten_json_tree(data: dict, source: str, merge_chars: int = 0) -> list[Do
     def emit(
         text: str, crumbs: list[str], meta: dict, id: str, parent_id: str | None
     ) -> None:
+        """Emit ``text`` as one Document, or several if it exceeds ``max_chars``.
+
+        Every piece repeats the breadcrumb, so a split tail still says which
+        section it belongs to. The first piece keeps the node's own id, so
+        ``parent_id`` references from its children still resolve; later pieces
+        get a ``~N`` suffix to stay distinct in the id map. All pieces share the
+        node's ``parent_id``, which makes them each other's siblings — so
+        retrieval's sibling expansion can pull a split section back together.
+        """
         text = (text or "").strip()
         if not text:
             return
         prefix = _CRUMB.join(crumb for crumb in crumbs if crumb)
-        documents.append(
-            Document(
-                text=f"{prefix}\n{text}" if prefix else text,
-                source=source,
-                meta=dict(meta),
-                id=id,
-                parent_id=parent_id,
+        for index, piece in enumerate(_split_text(text, max_chars)):
+            documents.append(
+                Document(
+                    text=f"{prefix}\n{piece}" if prefix else piece,
+                    source=source,
+                    meta=dict(meta),
+                    id=id if index == 0 else f"{id}{_PIECE}{index}",
+                    parent_id=parent_id,
+                )
             )
-        )
 
     # kolzchut intro paragraph — top-level content, so no structural parent.
     emit(data.get("lead", ""), [title], root_meta, id=f"{source}#lead", parent_id=None)
@@ -241,10 +328,18 @@ def load_documents(
 ) -> list[Document]:
     """Read every ``.json`` / ``.docx`` / ``.pdf`` / ``.txt`` in ``static_dir``.
 
-    ``max_chars`` packs prose (``.pdf`` / ``.txt``) into chunks; ``merge_chars``
-    coarsens section-trees (``.json``), collapsing small subtrees into one
-    Document — see :func:`_flatten_json_tree`. Set ``merge_chars=0`` to keep the
-    finest granularity (one Document per node).
+    ``max_chars`` is the ceiling on any one chunk, applied to every format: it
+    packs prose (``.pdf`` / ``.txt``), splits an over-long ``.docx`` paragraph,
+    and divides a section-tree node bigger than the budget. Nothing may exceed it,
+    because the embedder silently truncates at its context window and a chunk's
+    lost tail is unretrievable. ``merge_chars`` works the other way, coarsening
+    section-trees (``.json``) by collapsing small subtrees into one Document —
+    see :func:`_flatten_json_tree`. Set ``merge_chars=0`` to keep the finest
+    granularity (one Document per node), ``max_chars=0`` to disable splitting.
+
+    Keep ``max_chars`` comfortably inside the embedder's window: chunks also
+    carry a breadcrumb prefix, and Hebrew runs about three characters per token,
+    so the 500-char default lands near 200 tokens against e5's 512.
     """
     static_dir = Path(static_dir)
     documents: list[Document] = []
@@ -260,12 +355,24 @@ def load_documents(
         suffix = path.suffix.lower()
         if suffix == ".json":
             data = json.loads(path.read_text(encoding="utf-8"))
-            documents.extend(_flatten_json_tree(data, source=path.name, merge_chars=merge_chars))
+            documents.extend(
+                _flatten_json_tree(
+                    data,
+                    source=path.name,
+                    merge_chars=merge_chars,
+                    max_chars=max_chars,
+                )
+            )
         elif suffix == ".docx":
             texts = _read_docx_paragraphs(path)
             documents.extend(
-                Document(text=text, source=path.name, id=f"{path.name}#{i}")
+                Document(
+                    text=piece,
+                    source=path.name,
+                    id=f"{path.name}#{i}" if j == 0 else f"{path.name}#{i}{_PIECE}{j}",
+                )
                 for i, text in enumerate(texts)
+                for j, piece in enumerate(_split_text(text, max_chars))
             )
         else:
             raw = _read_pdf(path) if suffix == ".pdf" else _read_txt(path)

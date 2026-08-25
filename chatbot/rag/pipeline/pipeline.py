@@ -219,6 +219,73 @@ class RAGPipeline:
         top_idx = candidates[np.argsort(-rr)][: self.top_k]
         return top_idx, sims
 
+    def retrieval_diagnostics(
+            self,
+            query: str,
+            facts: dict | None = None,
+            context: str | None = DEFAULT_CONTEXT_ANCHOR,
+            context_weight: float | None = None,
+    ) -> dict:
+        """Return retrieval scores for drill-down threshold evaluation."""
+
+        if not self.documents:
+            return {
+                "top_raw_cosine": None,
+                "top_adjusted_score": None,
+                "second_adjusted_score": None,
+                "adjusted_gap": None,
+                "top_bm25": None,
+            }
+
+        # 1. Encode the user query (+ optional domain anchor).
+        query_vec = self._encode_query(query, context, context_weight)
+
+        # 2. Pure semantic cosine similarity.
+        raw_sims = self._cosine(self._embeddings, query_vec)
+
+        # 3. Apply the same metadata adjustment used by normal retrieval.
+        adjusted_sims = raw_sims + self.metadata_filter.adjust(
+            self.documents, facts or {}
+        )
+
+        ranked = np.argsort(-adjusted_sims)
+
+        top_idx = ranked[0]
+
+        top_raw_cosine = float(raw_sims[top_idx])
+        top_adjusted_score = float(adjusted_sims[top_idx])
+        second_adjusted_score = (
+            float(adjusted_sims[ranked[1]])
+            if len(ranked) > 1
+            else None
+        )
+
+        adjusted_gap = (
+            top_adjusted_score - second_adjusted_score
+            if second_adjusted_score is not None
+            else None
+        )
+
+        # 4. BM25 score over the same candidate pool used by the pipeline.
+        top_bm25 = None
+
+        if self.reranker is not None:
+            candidates = ranked[: self.candidate_k]
+            candidate_docs = [self.documents[i] for i in candidates]
+
+            bm25_scores = self.reranker.score(query, candidate_docs)
+
+            if len(bm25_scores):
+                top_bm25 = float(np.max(bm25_scores))
+
+        return {
+            "top_raw_cosine": top_raw_cosine,
+            "top_adjusted_score": top_adjusted_score,
+            "second_adjusted_score": second_adjusted_score,
+            "adjusted_gap": adjusted_gap,
+            "top_bm25": top_bm25,
+        }
+
     def matches(
         self,
         query: str,

@@ -153,6 +153,19 @@ if locality is not None:
     facts["locality"] = locality.hebrew
 
 if query:
+    diagnostics = pipeline.retrieval_diagnostics(
+        query,
+        facts or None,
+        context=context,
+        context_weight=context_weight,
+    )
+
+    with st.sidebar.expander("Retrieval diagnostics"):
+        st.write(f"Raw cosine: {diagnostics['top_raw_cosine']}")
+        st.write(f"Adjusted score: {diagnostics['top_adjusted_score']}")
+        st.write(f"Second adjusted: {diagnostics['second_adjusted_score']}")
+        st.write(f"Adjusted gap: {diagnostics['adjusted_gap']}")
+        st.write(f"Top BM25: {diagnostics['top_bm25']}")
     contexts = pipeline.retrieve(
         query, facts or None, context=context, context_weight=context_weight,
         sibling_k=sibling_k,

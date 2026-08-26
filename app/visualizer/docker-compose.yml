@@ -17,7 +17,14 @@ services:
       - "8501:8501"
     volumes:
       - hf-cache:/models                # e5 weights persist across restarts (dev)
-      - ../../data/static:/app/data/static  # corpus + embedding cache, bind-mounted
+      # Corpus + embedding cache, bind-mounted read-only. The image pins its
+      # own copy of the code, so a container built before a chunking change
+      # computes a different corpus, misses the cache, and would overwrite the
+      # host's newer one — after which the two versions ping-pong, each start
+      # paying a full re-encode. Read-only makes the container recompute in
+      # memory instead (see embedding_cache._try_save); rebuild the image to
+      # get fast startups back.
+      - ../../data/static:/app/data/static:ro
     restart: unless-stopped
 
 volumes:

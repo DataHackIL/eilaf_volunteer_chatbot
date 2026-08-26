@@ -155,17 +155,25 @@ injects the repo-root `.env`, and publishes port 8501:
 cd app/visualizer && docker compose up --build
 ```
 
-The compose file bind-mounts `data/static/` (corpus + embedding cache) and
-keeps the e5 weights in a named volume, so the model downloads once and
-survives restarts. The image installs the CPU build of torch regardless of the
-committed CUDA lock — see the comments in `app/visualizer/Dockerfile`.
+The compose file bind-mounts `data/static/` (corpus + embedding cache)
+**read-only** and keeps the e5 weights in a named volume, so the model downloads
+once and survives restarts. The image installs the CPU build of torch regardless
+of the committed CUDA lock — see the comments in `app/visualizer/Dockerfile`.
+
+> **Why read-only.** The image pins its own copy of the code. A container built
+> before a chunking change computes a different corpus, misses the cache, and —
+> if it could write — would overwrite the host's newer one; the two versions
+> then ping-pong, each start paying a full re-encode. This actually happened on
+> 2026-08-19. Read-only means such a container recomputes in memory instead
+> (slow start, nothing corrupted). **Rebuild the image after any change to
+> chunking or the embedder**, or every container start pays that cost.
 
 To build/run without compose:
 
 ```bash
 docker build -f app/visualizer/Dockerfile -t eilaf-visualizer .   # from the repo root
 docker run --rm -p 8501:8501 --env-file .env \
-  -v "$PWD/data/static:/app/data/static" eilaf-visualizer
+  -v "$PWD/data/static:/app/data/static:ro" eilaf-visualizer
 ```
 
 ### Cold-start times

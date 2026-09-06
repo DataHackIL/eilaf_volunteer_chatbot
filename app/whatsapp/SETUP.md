@@ -119,6 +119,34 @@ docker compose logs tunnel | grep trycloudflare
 >   the Cloudflare dashboard and use its `TUNNEL_TOKEN` — see the commented block
 >   in `docker-compose.yml`.
 
+### Rebuilding the corpus at boot (`SKIP_DATA_CURATION`)
+
+The container's entrypoint can rebuild the corpus — scrape → enrich → embed, via
+`scripts/curate_data.sh` — *before* uvicorn binds, so the webhook is never up
+while answering from a corpus that is still being written. It is **off by
+default** (`SKIP_DATA_CURATION=1` in `docker-compose.yml`): curation writes to
+the bind-mounted `data/static/`, and an image built before a chunking or
+embedder change would rewrite the host's corpus and embedding cache with its own
+older idea of them. Turn it on deliberately, on a freshly built image:
+
+```bash
+SKIP_DATA_CURATION=0 docker compose up --build
+```
+
+Set it in the **shell**, as above (or in `app/whatsapp/.env`, which compose
+interpolates) — not in the repo-root `.env`, which the `environment:` block
+overrides.
+
+Expect a long first boot: the enrichment pass is unbudgeted by default, so cap
+it with `ENRICH_LIMIT=500` and run it again later — nothing is lost between
+runs. `ENRICH_PROVIDER` (default `gemini`) and the `CURATE_*` variables from the
+README's curation table all pass straight through. A failed stage is logged
+loudly and the server starts anyway on the existing corpus; `CURATE_STRICT=1`
+makes it fatal instead.
+
+`EILAF_STATIC_DIR` moves the whole store off `/app/data/static` (an EC2 volume,
+or S3 via a mount) — see the README section of the same name.
+
 ### Running without Docker (alternative)
 ```bash
 python -m app.whatsapp.server          # uvicorn on :8000

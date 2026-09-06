@@ -35,11 +35,20 @@ RUN uv sync --no-install-project --no-dev
 
 # Copy only the source packages — NOT the manifests, which would revert the CPU
 # override/lock above. (data/static is bind-mounted at runtime; see compose.)
+# ``data`` carries the scrapers and the enrichment stage, which the entrypoint
+# runs before the server; ``scripts`` carries the chain that drives them.
 COPY app ./app
 COPY chatbot ./chatbot
+COPY data ./data
+COPY scripts ./scripts
 RUN uv sync --no-dev
 
 EXPOSE 8000
+
+# The entrypoint rebuilds the corpus (scrape → enrich → embed) and then execs
+# the CMD below. Set SKIP_DATA_CURATION=1 to boot straight into the server on
+# the corpus as mounted — which is what docker-compose.yml does by default.
+ENTRYPOINT ["/app/app/whatsapp/entrypoint.sh"]
 
 # Single uvicorn worker so the warm pipeline is loaded once and shared.
 CMD ["python", "-m", "app.whatsapp.server"]

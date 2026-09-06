@@ -12,10 +12,30 @@ services:
       context: ../..                    # repo root (relative to this file's dir)
       dockerfile: app/whatsapp/Dockerfile
     env_file: ../../.env                # repo-root .env → WHATSAPP_* / GEMINI_API_KEY
+    environment:
+      # The entrypoint can rebuild the corpus before the server starts
+      # (scrape → enrich → embed, see app/whatsapp/entrypoint.sh). It is OFF by
+      # default: it writes to the bind-mounted data/static below, and an image
+      # built before a chunking/embedder change would rewrite the host's corpus
+      # and cache with its own older idea of them. Turn it on deliberately —
+      #   SKIP_DATA_CURATION=0 docker compose up --build
+      # — on a freshly built image, and expect a long first boot (the LLM
+      # enrichment pass is unbudgeted; cap it with ENRICH_LIMIT).
+      SKIP_DATA_CURATION: "${SKIP_DATA_CURATION:-1}"
+      ENRICH_PROVIDER: "${ENRICH_PROVIDER:-gemini}"
+      ENRICH_LIMIT: "${ENRICH_LIMIT:-}"
+      # Where the corpus lives *inside the container*. Empty falls back to the
+      # repo-local data/static, which is what the bind mount below fills. Point
+      # it at another mount (an EC2 volume, or S3 via mountpoint-s3) to move the
+      # whole store — raw/, enriched/ and .embeddings/ follow it together.
+      EILAF_STATIC_DIR: "${EILAF_STATIC_DIR:-}"
     ports:
       - "8000:8000"
     volumes:
       - hf-cache:/models                # e5 weights persist across restarts (dev)
+      # Read-WRITE on purpose (the visualizer mounts the same dir read-only):
+      # curation has to persist the corpus and embedding cache back to the host,
+      # which is only safe while SKIP_DATA_CURATION is honoured above.
       - ../../data/static:/app/data/static  # corpus + embedding cache, bind-mounted
     restart: unless-stopped
 

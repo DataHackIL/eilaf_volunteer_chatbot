@@ -23,13 +23,17 @@ variable (it can't be a conditional path in `pyproject.toml`), and
 > add the appropriate `[tool.uv.sources]` / index for the `cuXXX` wheels
 > before syncing so you don't overwrite an existing GPU stack.
 
-## Build the corpus: scraping → enrichment
+## Build the corpus: scraping → enrichment → embedding
 
 The RAG pipeline reads `data/static/enriched/`. That directory is produced by
-two pipelines, run in order (both re-runnable and incremental):
+the stages below, run in order (all re-runnable and incremental) — or by
+`scripts/curate_data.sh`, which chains them:
 
 ```text
 web / .docx  ──scrape──▶  data/static/raw/*.json  ──enrich──▶  data/static/enriched/*.json
+                                                                  │
+                                                            embed ▼
+                                                  data/static/enriched/.embeddings/
 ```
 
 > **Run this before the app — a fresh clone has no corpus.** The scraped and
@@ -123,6 +127,70 @@ often, so if `--provider gemini` starts reporting model errors, check
 > 10k pass is hours, and Gemini's free-tier daily quotas will spread it over
 > days. Budget it with `--limit` and run it repeatedly; nothing is lost between
 > runs.
+
+### 3. Embed
+
+The corpus is embedded once and cached on disk
+(`data/static/enriched/.embeddings/`), fingerprinted by corpus *and* embedder.
+The app does this lazily on its first query — which is fine for Streamlit but
+not for a webhook, where the first user would wait out the whole encode. Warm it
+ahead of time:
+
+```bash
+python -m chatbot.rag.pipeline.warm_cache
+```
+
+A no-op (a sub-second load) when neither the corpus nor the embedder changed, so
+it is safe to run on every boot; a full re-encode — around an hour on CPU — when
+either did.
+
+### All three stages at once
+
+`scripts/curate_data.sh` chains scrape → enrich → embed in the only order they
+work in. Everything is incremental, so re-running it is cheap once the corpus
+exists:
+
+```bash
+./scripts/curate_data.sh
+```
+
+Stages are non-fatal by default: a refused scrape or an exhausted LLM quota is
+reported and the run continues, so the embed stage still publishes whatever
+corpus exists. The script exits non-zero if anything failed. Environment
+variables tune it:
+
+| Variable | Default | What it does |
+| --- | --- | --- |
+| `CURATE_SKIP_SCRAPE` / `_ENRICH` / `_EMBED` | `0` | `1` skips that one stage |
+| `CURATE_SCRAPERS` | `nevo kol_zchut gov_il` | which `data.scraping` modules to run (`docx_source` is out: it globs a private local folder) |
+| `ENRICH_PROVIDER` | `gemini` | `claude` / `gemini` / `cerebras` |
+| `ENRICH_LIMIT` | *(unset)* | cap segments sent to the LLM this run; unset means the whole pending backlog, which can take hours |
+| `ENRICH_ARGS` | *(unset)* | extra flags for `python -m data.enrich`, e.g. `--no-llm` |
+| `CURATE_STRICT` | `0` | `1` aborts on the first stage failure |
+| `PYTHON` | `python` | interpreter to run the stages with |
+
+### Where the corpus lives: `EILAF_STATIC_DIR`
+
+Everything above hangs off one root, `data/static/` by default. Set
+`EILAF_STATIC_DIR` to move the whole store — `raw/`, `enriched/` and
+`.embeddings/` travel together, and scrapers, enrichment, the apps and the cache
+all follow it:
+
+```bash
+EILAF_STATIC_DIR=/mnt/eilaf-static ./scripts/curate_data.sh
+```
+
+Read **once, at import**, so it has to be a real environment variable (docker
+compose's `env_file` makes one; a value set from Python later will not be seen).
+An empty value falls back to the repo-local default.
+
+For a deployment (EC2, S3) this is the hook to use, but note it is a
+*filesystem* path — nothing here speaks the S3 API. Point it at S3 through a
+mount (`mountpoint-s3`, `s3fs`) or sync the bucket to local disk before start
+and point it at that copy. A synced local copy is the safer of the two: the
+embedding cache is a 20 MB `.npy` the pipeline memory-maps at boot and the
+loader re-reads every JSON in the corpus, so per-object latency on a FUSE mount
+lands directly on startup time.
 
 ## Run the Streamlit app
 

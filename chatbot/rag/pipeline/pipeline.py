@@ -10,6 +10,7 @@ Terminal demo::
 
 from __future__ import annotations
 
+import os
 import sys
 from collections.abc import Sequence
 from pathlib import Path
@@ -33,8 +34,17 @@ DEFAULT_CONTEXT_ANCHOR = "נפגע אירוע אלימות"
 # the user's question. Decoupled from text length, unlike plain concatenation.
 DEFAULT_CONTEXT_WEIGHT = 0.4
 
-# repo_root/data/static  (this file is chatbot/rag/pipeline/pipeline.py)
-_STATIC_DIR = Path(__file__).resolve().parents[3] / "data" / "static"
+# The static store, defaulting to repo_root/data/static (this file is
+# chatbot/rag/pipeline/pipeline.py). ``EILAF_STATIC_DIR`` moves the whole store
+# elsewhere for a deployment — an EC2 volume, or an S3 bucket exposed as a
+# directory (mountpoint-s3 / s3fs / a sync into local disk at boot). Everything
+# downstream hangs off this one root, so scrapers, enrichment and the embedding
+# cache all follow it together. It is read once, at import: set it as a real
+# environment variable (docker compose's ``env_file`` does), not later in code.
+_STATIC_DIR = Path(
+    os.environ.get("EILAF_STATIC_DIR")
+    or Path(__file__).resolve().parents[3] / "data" / "static"
+)
 # The static store is split in two: scrapers write raw section-trees to ``raw/``;
 # the enrich stage (``data/enrich``) reads ``raw/`` and writes annotated copies to
 # ``enriched/`` — which is what the RAG pipeline actually reads.

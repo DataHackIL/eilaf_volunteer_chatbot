@@ -74,9 +74,36 @@ def load_or_encode(
                 return matrix
 
     matrix = embedder.encode_documents(texts)
-    cache_dir.mkdir(parents=True, exist_ok=True)
-    np.save(matrix_path, matrix)
-    meta_path.write_text(
-        json.dumps(want, ensure_ascii=False, indent=2), encoding="utf-8"
-    )
+    _try_save(cache_dir, matrix_path, meta_path, want, matrix)
     return matrix
+
+
+def _try_save(
+    cache_dir: Path,
+    matrix_path: Path,
+    meta_path: Path,
+    want: dict,
+    matrix: np.ndarray,
+) -> None:
+    """Persist the matrix + fingerprint, tolerating an unwritable cache dir.
+
+    The cache is an optimisation, never a correctness requirement, so failing to
+    write it must not take the caller down. The case this exists for is a
+    deliberately read-only mount: containers share this directory with the host
+    but pin their own copy of the code, and a container running an older loader
+    would otherwise recompute a *different* chunking and overwrite a newer,
+    correct cache — last writer wins, and the two versions ping-pong. Mounting
+    read-only stops that; this keeps such a container running (recomputing in
+    memory each start) instead of crashing on PermissionError.
+    """
+    try:
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        np.save(matrix_path, matrix)
+        meta_path.write_text(
+            json.dumps(want, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+    except OSError as exc:
+        print(
+            f"embedding_cache: could not write {cache_dir} ({exc}); "
+            "embeddings held in memory for this run only"
+        )

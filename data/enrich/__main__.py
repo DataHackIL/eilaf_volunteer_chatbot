@@ -86,6 +86,7 @@ def main() -> None:
     # Only a positive limit drives the stop-early budget; dry-run/no-llm send 0.
     remaining = None if not needs_llm else args.limit
     total_pending = 0
+    total_failed = 0
 
     for raw_path in raw_files:
         raw_tree = json.loads(raw_path.read_text(encoding="utf-8"))
@@ -97,7 +98,7 @@ def main() -> None:
         )
 
         max_new = remaining if needs_llm else 0
-        tree, n_pending, billed = annotate_tree(
+        tree, n_pending, sent, annotated = annotate_tree(
             raw_tree, enricher, existing, max_new=max_new
         )
         total_pending += n_pending
@@ -109,7 +110,8 @@ def main() -> None:
         out_path.write_text(
             json.dumps(tree, ensure_ascii=False, indent=2), encoding="utf-8"
         )
-        deferred = n_pending - billed
+        deferred = n_pending - annotated
+        failed = sent - annotated
         if no_llm:
             print(
                 f"{raw_path.name}: rules-only "
@@ -117,18 +119,30 @@ def main() -> None:
             )
         else:
             print(
-                f"{raw_path.name}: enriched ({billed} sent to {args.provider}"
-                + (f", {deferred} deferred" if deferred else "")
+                f"{raw_path.name}: enriched ({annotated} annotated by "
+                f"{args.provider}"
+                + (f", {failed} FAILED and left pending" if failed else "")
+                + (f", {deferred - failed} deferred" if deferred - failed else "")
                 + ")"
             )
+        total_failed += failed
         if remaining is not None:
-            remaining -= billed
+            # Spend the budget on attempts, not successes: a failing back-end
+            # must not be able to keep calling past --limit.
+            remaining -= sent
             if remaining <= 0:
-                print(f"--limit reached; {total_pending - billed}+ segments deferred.")
+                print(f"--limit reached; {total_pending - annotated}+ segments deferred.")
                 break
 
     if args.dry_run:
         print(f"total: {total_pending} segments would be sent to the LLM.")
+    elif total_failed:
+        # Loud on purpose: a run can "succeed" (exit 0) while the back-end
+        # answered nothing — a retired model name does exactly that.
+        print(
+            f"WARNING: {total_failed} segments failed and were left pending. "
+            f"Check the errors above before re-running."
+        )
 
 
 if __name__ == "__main__":

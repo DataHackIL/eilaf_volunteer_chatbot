@@ -52,6 +52,7 @@ run with; edit that list to add sources.
 ```bash
 python -m data.scraping.nevo         # Israeli law texts (modern + legacy templates)
 python -m data.scraping.kol_zchut    # KolZchut rights pages, via the MediaWiki API
+python -m data.scraping.gov_il       # gov.il guides and information pages, via its content API
 python -m data.scraping.docx_source  # local .docx drafts → the same section-tree JSON
 ```
 
@@ -59,15 +60,37 @@ Output is one JSON section tree per source in `data/static/raw/`, named after
 the URL. `docx_source` globs a local folder — point it at your own path before
 running.
 
+> **gov.il:** the site is a single-page app behind Cloudflare bot management —
+> its HTML is an empty shell and the request is refused on its TLS fingerprint,
+> so there is nothing to scrape. `gov_il.py` instead calls the content API the
+> site's own front end uses, on a host that is not behind Cloudflare. Requests
+> need both an `x-client-id` and an `Origin: https://www.gov.il` header; without
+> `Origin` the gateway answers `500 RF-OriginError`, which looks like a server
+> fault rather than a rejected request. gov.il publishes no sitemap, so
+> `list_pages()` in that module discovers page URLs from a topic or office
+> landing page.
+
 > **Time:** one HTTP request per page, so this is fast — measured **0.4–1.2 s
 > per page** (the largest legacy nevo law is the slow end), i.e. a few seconds
 > for the whole current source list. Adding many pages scales linearly.
 
 ### 2. Enrich
 
-Every text segment gets a `useful` flag plus age/gender tags, via an LLM.
+Every text segment gets a `useful` flag plus age/gender/track tags, via an LLM.
 Re-runs reuse the previous enriched copy and reject obvious junk by rule, so
 only new or changed segments are ever billed.
+
+`track` marks content belonging to a separate compensation track — hostile
+acts, military bereavement, road or work accidents — which Israeli law routes
+through its own authorities and eligibility tests. That material reads like
+ordinary victim support, so without the tag retrieval offers it for the
+neighbourhood-violence questions this bot exists to answer, and the entitlements
+do not carry over. It is the one axis that penalises on a *missing* fact: a
+tagged chunk is off-track until a user fact affirms it. A source devoted
+entirely to one track can also stamp `track` on its tree root (see
+`_HOSTILE_ACTS` in `data/scraping/gov_il.py`), which the loader inherits down to
+every segment — per-segment inference cannot catch a lone sentence like "the
+allowance is paid monthly", but the page it came from knows.
 
 ```bash
 python -m data.enrich --dry-run                    # count what would be sent; calls nothing
@@ -78,6 +101,19 @@ python -m data.enrich --provider claude --limit 500  # budgeted LLM run
 `--provider` picks the back-end: `claude` (default, Message Batches API),
 `gemini` (Google AI free tier), or `cerebras`. Neither back-end has a spend
 cap, hence `--dry-run` / `--limit N` — always dry-run first.
+
+`gemini` is the working free back-end. `cerebras` was the bulk option on its
+free tier, but as of 2026-08-18 the key returns `402 payment_required` on every
+call, so it needs billing (or a swap to Groq/OpenRouter — a one-line change in
+`openai_enricher.py`) before it can carry the ~10k nevo backlog.
+
+A segment the back-end fails on is left un-annotated and stays pending, so a
+later run retries it; the run ends with a loud `WARNING: N segments failed` if
+any did. Watch for that — a run can otherwise exit 0 having answered nothing,
+which is exactly what a retired model name does. Google retires Gemini models
+often, so if `--provider gemini` starts reporting model errors, check
+`ROTATION_MODELS` in `data/enrich/gemini_enricher.py` against
+`client.models.list()`.
 
 > **Time:** `--dry-run` and `--no-llm` are seconds (pure local work). The LLM
 > pass is the long one: the current raw corpus has **~10,000 segments still
@@ -131,17 +167,25 @@ injects the repo-root `.env`, and publishes port 8501:
 cd app/visualizer && docker compose up --build
 ```
 
-The compose file bind-mounts `data/static/` (corpus + embedding cache) and
-keeps the e5 weights in a named volume, so the model downloads once and
-survives restarts. The image installs the CPU build of torch regardless of the
-committed CUDA lock — see the comments in `app/visualizer/Dockerfile`.
+The compose file bind-mounts `data/static/` (corpus + embedding cache)
+**read-only** and keeps the e5 weights in a named volume, so the model downloads
+once and survives restarts. The image installs the CPU build of torch regardless
+of the committed CUDA lock — see the comments in `app/visualizer/Dockerfile`.
+
+> **Why read-only.** The image pins its own copy of the code. A container built
+> before a chunking change computes a different corpus, misses the cache, and —
+> if it could write — would overwrite the host's newer one; the two versions
+> then ping-pong, each start paying a full re-encode. This actually happened on
+> 2026-08-19. Read-only means such a container recomputes in memory instead
+> (slow start, nothing corrupted). **Rebuild the image after any change to
+> chunking or the embedder**, or every container start pays that cost.
 
 To build/run without compose:
 
 ```bash
 docker build -f app/visualizer/Dockerfile -t eilaf-visualizer .   # from the repo root
 docker run --rm -p 8501:8501 --env-file .env \
-  -v "$PWD/data/static:/app/data/static" eilaf-visualizer
+  -v "$PWD/data/static:/app/data/static:ro" eilaf-visualizer
 ```
 
 ### Cold-start times

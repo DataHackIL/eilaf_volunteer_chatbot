@@ -2,8 +2,10 @@
 
 One Claude request per segment does both jobs — usefulness *and* group tags — via
 the Batches API (50% cost, non-latency-sensitive) with a strict JSON schema so
-every result validates against :class:`SegmentAnnotation`. Claude is imported
-lazily, so the rest of ``data.enrich`` stays usable without the SDK or a key.
+every result validates against :class:`SegmentAnnotation`. A request that
+errored, expired or came back malformed is marked ``ok=False`` and left for a
+later run rather than recorded as an answer. Claude is imported lazily, so the
+rest of ``data.enrich`` stays usable without the SDK or a key.
 """
 
 from __future__ import annotations
@@ -11,8 +13,9 @@ from __future__ import annotations
 import json
 import time
 from collections.abc import Sequence
+from typing import get_args
 
-from data.enrich.base import SegmentAnnotation, SegmentEnricher
+from data.enrich.base import SegmentAnnotation, SegmentEnricher, Track
 
 # Centralized so the model tier is a one-line change. Sonnet 5 has adaptive
 # thinking on by default; this is a cheap bulk classification, so we turn it off.
@@ -30,6 +33,13 @@ _SYSTEM = (
     "it states one; null if it applies to any age.\n"
     "- gender: \"m\" or \"f\" if eligibility is restricted to that gender; null "
     "if it applies to anyone.\n"
+    "- track: the separate compensation track the segment is about, when it is "
+    "about one — \"hostile_acts\" (נפגעי פעולות איבה / terror), \"military\" "
+    "(נפגעי צה\"ל, משפחות שכולות), \"road_accident\" (תאונת דרכים, פלת\"ד), "
+    "\"work_accident\" (תאונת עבודה, נפגעי עבודה). These are routed by separate "
+    "laws and paying authorities, so their entitlements do not carry over to a "
+    "victim of ordinary criminal violence. Use null when the segment is about "
+    "crime victims generally rather than one of these tracks.\n"
     "Base every field only on what the segment itself states. When unsure, leave "
     "a tag null and keep useful=true."
 )
@@ -44,8 +54,14 @@ _ANNOTATION_SCHEMA = {
         "min_age": {"anyOf": [{"type": "integer"}, {"type": "null"}]},
         "max_age": {"anyOf": [{"type": "integer"}, {"type": "null"}]},
         "gender": {"anyOf": [{"type": "string", "enum": ["m", "f"]}, {"type": "null"}]},
+        "track": {
+            "anyOf": [
+                {"type": "string", "enum": list(get_args(Track))},
+                {"type": "null"},
+            ]
+        },
     },
-    "required": ["useful", "min_age", "max_age", "gender"],
+    "required": ["useful", "min_age", "max_age", "gender", "track"],
 }
 
 
@@ -108,9 +124,10 @@ class ClaudeSegmentEnricher(SegmentEnricher):
         )
         batch = self._await_batch(client, batch.id)
 
-        # Default keeps a segment (useful, untagged) so an errored/missing result
-        # never silently drops content.
-        annotations = [SegmentAnnotation() for _ in segments]
+        # Default defers a segment: a result missing from the batch was never
+        # answered, so it must stay pending for a later run rather than be
+        # recorded as "useful, unconstrained".
+        annotations = [SegmentAnnotation(ok=False) for _ in segments]
         input_tokens = output_tokens = 0
         for result in client.messages.batches.results(batch.id):
             index = _index_of(result.custom_id)
@@ -150,10 +167,10 @@ class ClaudeSegmentEnricher(SegmentEnricher):
     @staticmethod
     def _parse_result(result) -> SegmentAnnotation:
         if result.result.type != "succeeded":
-            return SegmentAnnotation()  # keep on error/expiry/cancel
+            return SegmentAnnotation(ok=False)  # defer on error/expiry/cancel
         message = result.result.message
         text = next((b.text for b in message.content if b.type == "text"), "")
         try:
             return SegmentAnnotation.model_validate_json(text)
         except (ValueError, json.JSONDecodeError):
-            return SegmentAnnotation()
+            return SegmentAnnotation(ok=False)

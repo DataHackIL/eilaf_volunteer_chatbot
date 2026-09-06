@@ -206,8 +206,11 @@ class RAGPipeline:
         """
         query_vec = self._encode_query(query, context, context_weight)
         sims = self._cosine(self._embeddings, query_vec)
-        if facts:
-            sims = sims + self.metadata_filter.adjust(self.documents, facts)
+        # Always consult the filter, even with no answered facts: the ``track``
+        # axis penalises chunks scoped to a separate compensation track unless a
+        # fact affirms it, so an unanswered form has to reach the filter to take
+        # effect. Every other axis is a no-op on empty facts.
+        sims = sims + self.metadata_filter.adjust(self.documents, facts or {})
         ranked = np.argsort(-sims)
         if self.reranker is None:
             return ranked[: self.top_k], sims

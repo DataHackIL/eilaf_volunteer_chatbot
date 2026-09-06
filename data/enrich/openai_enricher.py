@@ -3,14 +3,16 @@
 A drop-in sibling of :class:`~data.enrich.claude_enricher.ClaudeSegmentEnricher`
 and :class:`~data.enrich.gemini_enricher.GeminiSegmentEnricher` for any provider
 that exposes an OpenAI-style ``/chat/completions`` endpoint. Defaults to
-**Cerebras** — a generous free daily quota (~14k requests/day, far above Gemini's
-free tier) — running ``gpt-oss-120b``.
+**Cerebras** running ``gpt-oss-120b``. Its free tier was once ~14k requests/day
+(far above Gemini's), but as of 2026-08-18 this account's key answers every
+request with ``402 payment_required``, so treat the free quota as gone until
+billing is set up — ``--provider gemini`` is the working free path.
 
 Like the Gemini free tier there's no Batches API, so segments are sent one
 request at a time. The same annotation spec is reused (``_SYSTEM`` +
 ``SegmentAnnotation``); JSON is requested via ``response_format`` and validated
-with pydantic, so a malformed reply keeps the segment (useful, untagged) rather
-than dropping it. The ``openai`` SDK is imported lazily so the rest of
+with pydantic, so a malformed reply defers the segment to a later run rather
+than recording a guess. The ``openai`` SDK is imported lazily so the rest of
 ``data.enrich`` stays usable without the SDK or a key.
 
 Other free providers are a one-line construction change, e.g.::
@@ -27,15 +29,17 @@ from __future__ import annotations
 import json
 import os
 from collections.abc import Sequence
+from typing import get_args
 
-from data.enrich.base import SegmentAnnotation, SegmentEnricher
+from data.enrich.base import SegmentAnnotation, SegmentEnricher, Track
 
 # Reuse the exact classification spec from the Claude enricher so every back-end
 # annotates against one prompt; only the transport differs.
 from data.enrich.claude_enricher import _SYSTEM
 
-# Cerebras defaults (generous free daily quota, fast). Groq/OpenRouter are a
-# one-line swap; the live catalogue is at inference-docs.cerebras.ai/models.
+# Cerebras defaults (fast; see the module docstring on its quota). Groq /
+# OpenRouter are a one-line swap and are the route to try if Cerebras stays
+# behind billing; the live catalogue is at inference-docs.cerebras.ai/models.
 BASE_URL = "https://api.cerebras.ai/v1"
 KEY_ENV = "CEREBRAS_API_KEY"
 MODEL = "gpt-oss-120b"
@@ -50,7 +54,9 @@ _MAX_RETRIES = 5
 _JSON_INSTRUCTION = (
     "\n\nRespond with a single JSON object and nothing else, with exactly these "
     'keys: "useful" (boolean), "min_age" (integer or null), "max_age" (integer '
-    'or null), "gender" ("m", "f", or null).'
+    'or null), "gender" ("m", "f", or null), "track" ('
+    + ", ".join(f'"{value}"' for value in get_args(Track))
+    + ", or null)."
 )
 _SYSTEM_JSON = _SYSTEM + _JSON_INSTRUCTION
 
@@ -93,11 +99,11 @@ class OpenAICompatibleSegmentEnricher(SegmentEnricher):
         return self._client
 
     def _annotate_one(self, segment: str) -> tuple[SegmentAnnotation, int, int]:
-        """Annotate a single segment; keep it untagged on any API error.
+        """Annotate a single segment; defer it on any API error.
 
         Returns ``(annotation, input_tokens, output_tokens)``. The SDK retries
-        rate limits internally; a persistent failure keeps the segment (useful,
-        untagged) so content is never silently dropped.
+        rate limits internally; a persistent failure marks the segment
+        ``ok=False``, leaving it un-annotated for a later run to retry.
         """
         from openai import OpenAIError
 
@@ -114,8 +120,8 @@ class OpenAICompatibleSegmentEnricher(SegmentEnricher):
                 ],
             )
         except OpenAIError as exc:
-            print(f"  openai: request failed ({exc}); keeping segment untagged")
-            return SegmentAnnotation(), 0, 0
+            print(f"  openai: request failed ({exc}); segment deferred")
+            return SegmentAnnotation(ok=False), 0, 0
 
         usage = response.usage
         in_tok = getattr(usage, "prompt_tokens", 0) or 0
@@ -151,9 +157,11 @@ class OpenAICompatibleSegmentEnricher(SegmentEnricher):
 
     @staticmethod
     def _parse_text(text: str | None) -> SegmentAnnotation:
+        # A blocked/empty/malformed reply is a failed attempt, not a verdict:
+        # defer it (``ok=False``) so a later run asks again.
         if not text:
-            return SegmentAnnotation()  # keep on empty/blocked response
+            return SegmentAnnotation(ok=False)
         try:
             return SegmentAnnotation.model_validate_json(text)
         except (ValueError, json.JSONDecodeError):
-            return SegmentAnnotation()
+            return SegmentAnnotation(ok=False)

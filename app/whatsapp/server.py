@@ -71,7 +71,9 @@ def _verify_signature(request: Request, raw: bytes) -> None:
     """Validate the App-Secret HMAC on the raw body (skipped if unconfigured).
 
     Leaving ``WHATSAPP_APP_SECRET`` unset disables the check — convenient for
-    local/offline testing; production must set it (documented in SETUP.md).
+    local/offline testing. Production cannot reach this state: ``EILAF_ENV=prod``
+    makes the secret mandatory at import (see ``config``'s production guards),
+    so the container refuses to boot rather than serve an open webhook.
     """
     secret = config.APP_SECRET
     if not secret:

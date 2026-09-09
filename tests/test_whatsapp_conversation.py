@@ -10,11 +10,12 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import importlib
 
 import pytest
 from fastapi.testclient import TestClient
 
-from app.whatsapp import conversation, server
+from app.whatsapp import config, conversation, server
 from chatbot.rag.documents.documents import Document
 
 
@@ -225,3 +226,43 @@ def test_signature_rejected_when_secret_set(monkeypatch):
             "/webhook", content=b"{}", headers={"X-Hub-Signature-256": good}
         )
         assert resp.status_code == 200
+
+
+# --------------------------------------------------------------------------- #
+# Production guards (config imported with EILAF_ENV set)
+# --------------------------------------------------------------------------- #
+
+
+@pytest.fixture
+def reload_config(monkeypatch):
+    """Re-import ``config`` under a patched environment, then restore it.
+
+    The guards run at import time, so they can only be exercised by reloading
+    the module. Setting a key to "" still counts as *present* for ``load_dotenv``
+    (which never overrides os.environ), so a real repo-root .env cannot leak in
+    and make these pass by accident.
+    """
+
+    def _reload(**env):
+        for key, value in env.items():
+            monkeypatch.setenv(key, value)
+        return importlib.reload(config)
+
+    yield _reload
+    monkeypatch.undo()
+    importlib.reload(config)
+
+
+def test_prod_refuses_to_import_without_app_secret(reload_config):
+    with pytest.raises(RuntimeError, match="WHATSAPP_APP_SECRET"):
+        reload_config(EILAF_ENV="prod", WHATSAPP_APP_SECRET="")
+
+
+def test_prod_imports_with_app_secret(reload_config):
+    reloaded = reload_config(EILAF_ENV="prod", WHATSAPP_APP_SECRET="s3cret")
+    assert reloaded.APP_SECRET == "s3cret"
+
+
+def test_dev_still_tolerates_a_missing_app_secret(reload_config):
+    reloaded = reload_config(EILAF_ENV="", WHATSAPP_APP_SECRET="")
+    assert reloaded.APP_SECRET == ""

@@ -147,6 +147,26 @@ makes it fatal instead.
 `EILAF_STATIC_DIR` moves the whole store off `/app/data/static` (an EC2 volume,
 or S3 via a mount) — see the README section of the same name.
 
+### Production mode (`EILAF_ENV`)
+
+`WHATSAPP_APP_SECRET` is what stops anyone but Meta posting to your webhook, and
+the check is *skipped* when the secret is empty — fine offline, an open webhook
+on a public host. Set `EILAF_ENV=prod` on anything internet-reachable and the
+secret becomes mandatory: `app/whatsapp/config.py` raises at import, before
+uvicorn binds, so a missing or botched secret crash-loops the container visibly
+instead of quietly serving unauthenticated traffic.
+
+```bash
+EILAF_ENV=prod docker compose up -d
+```
+
+Leave it unset locally — nothing changes and the offline flow keeps working.
+
+> Rotating the secret takes a container **recreate**, not a restart:
+> `config.py` reads the environment once at import, and `docker compose restart`
+> reuses the old container's environment. Use
+> `docker compose up -d --force-recreate chatbot`.
+
 ### Running without Docker (alternative)
 ```bash
 python -m app.whatsapp.server          # uvicorn on :8000
@@ -196,6 +216,9 @@ cloudflared tunnel --url http://localhost:8000   # separate terminal
 - **`WHATSAPP_* is not set`** — the container isn't seeing `.env`; ensure it
   exists at the repo root (compose reads `../../.env`).
 - **403 on POST** — signature mismatch: `WHATSAPP_APP_SECRET` is wrong. Leaving
-  it unset disables the check (dev only) — set it for anything real.
+  it unset disables the check (dev only) — see *Production mode* below.
+- **Container exits with `WHATSAPP_APP_SECRET is not set`** — working as
+  intended: `EILAF_ENV=prod` is set and the secret didn't reach the container.
+  Fix the secret rather than clearing `EILAF_ENV`.
 - **Sender not a test recipient** — in test mode add the number under
   *API Setup → recipient phone number* first.

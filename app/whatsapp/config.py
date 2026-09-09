@@ -27,6 +27,10 @@ PHONE_NUMBER_ID = os.environ.get("WHATSAPP_PHONE_NUMBER_ID", "")
 VERIFY_TOKEN = os.environ.get("WHATSAPP_VERIFY_TOKEN", "")
 APP_SECRET = os.environ.get("WHATSAPP_APP_SECRET", "")
 
+# Marks a deployment that is reachable from the internet. Only tightens the
+# checks below — unset (the default) keeps local/offline runs permissive.
+ENV = os.environ.get("EILAF_ENV", "")
+
 
 def require(name: str, value: str) -> str:
     """Return ``value`` or raise if it's empty — a clear miss-config message."""
@@ -35,6 +39,17 @@ def require(name: str, value: str) -> str:
             f"{name} is not set — add it to .env (see app/whatsapp/SETUP.md)"
         )
     return value
+
+
+# --- production guards -------------------------------------------------------
+# ``server._verify_signature`` skips the App-Secret HMAC when the secret is
+# empty: convenient offline, an *open webhook* on a public host — anyone who
+# finds the URL could drive the pipeline and send messages as us. Fail here, at
+# import, so a missing secret stops the container before uvicorn binds instead
+# of degrading silently. A botched secret refresh then crash-loops visibly
+# (compose restarts it) rather than serving traffic unauthenticated.
+if ENV == "prod":
+    require("WHATSAPP_APP_SECRET", APP_SECRET)
 
 
 def graph_url() -> str:

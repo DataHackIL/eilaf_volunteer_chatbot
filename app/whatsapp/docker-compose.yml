@@ -22,6 +22,10 @@ services:
       # — on a freshly built image, and expect a long first boot (the LLM
       # enrichment pass is unbudgeted; cap it with ENRICH_LIMIT).
       SKIP_DATA_CURATION: "${SKIP_DATA_CURATION:-1}"
+      # Set to "prod" on any internet-reachable host: it makes
+      # WHATSAPP_APP_SECRET mandatory, so a missing/botched secret crash-loops
+      # the container instead of quietly serving an unauthenticated webhook.
+      EILAF_ENV: "${EILAF_ENV:-}"
       ENRICH_PROVIDER: "${ENRICH_PROVIDER:-gemini}"
       ENRICH_LIMIT: "${ENRICH_LIMIT:-}"
       # Where the corpus lives *inside the container*. Empty falls back to the

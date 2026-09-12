@@ -20,6 +20,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.visualizer.i18n import TEXTS, ArabicText, EnglishText, HebrewText, Language
+from app.visualizer.i18n import TEXTS, Language
 from app.whatsapp import client, config, conversation, server
 from chatbot.rag.documents.documents import Document
 
@@ -573,3 +574,104 @@ def test_boot_check_warns_when_expiry_is_close(monkeypatch, caplog):
         server._check_access_token()
     assert "rotate it" in caplog.text
     assert any(r.levelno == logging.WARNING for r in caplog.records)
+
+
+# --------------------------------------------------------------------------- #
+# Session expiry and explicit restart                                          #
+# --------------------------------------------------------------------------- #
+
+
+def _drive(wa_id, *messages):
+    """Send each message in turn, returning the final batch of replies."""
+    replies = []
+    for m in messages:
+        replies = conversation.handle_message(wa_id, text=m)
+    return replies
+
+
+def test_idle_session_expires_and_next_message_starts_fresh(fake_pipeline, monkeypatch):
+    """Coming back after the TTL is a new conversation, not a continuation."""
+    conversation.reset("u-ttl")
+    _drive("u-ttl", "שלום", "מה מגיע לי?")
+    assert conversation._SESSIONS["u-ttl"].query  # mid-conversation
+
+    # Age the session past the TTL rather than sleeping.
+    session = conversation._SESSIONS["u-ttl"]
+    session.last_seen -= config.SESSION_TTL_SECONDS + 1
+
+    conversation.handle_message("u-ttl", text="שאלה חדשה")
+    fresh = conversation._SESSIONS["u-ttl"]
+    assert fresh.query == "", "stale query survived expiry"
+    assert fresh.context == conversation.DEFAULT_CONTEXT_ANCHOR
+
+
+def test_sweep_drops_idle_sessions_so_the_dict_does_not_grow(fake_pipeline):
+    """The only bound on _SESSIONS: without this it grows for every wa_id ever."""
+    conversation._SESSIONS.clear()
+    conversation._last_sweep = 0.0
+    for i in range(5):
+        conversation.handle_message(f"u-sweep-{i}", text="hi")
+    for session in conversation._SESSIONS.values():
+        session.last_seen -= config.SESSION_TTL_SECONDS + 1
+
+    conversation._last_sweep = 0.0  # allow the throttled sweep to run
+    conversation.handle_message("u-live", text="hi")
+    assert set(conversation._SESSIONS) == {"u-live"}
+
+
+def test_sweep_is_throttled(fake_pipeline, monkeypatch):
+    """A sweep on every turn would be O(sessions) per message for no gain."""
+    conversation._SESSIONS.clear()
+    conversation.handle_message("u-a", text="hi")
+    conversation._SESSIONS["u-a"].last_seen -= config.SESSION_TTL_SECONDS + 1
+    # _last_sweep was just set by the call above, so this one must not sweep;
+    # u-a still goes, but via the per-user check, not the sweep.
+    conversation.handle_message("u-b", text="hi")
+    assert "u-b" in conversation._SESSIONS
+
+
+def test_restart_keyword_restarts_immediately(fake_pipeline):
+    """Exact keyword, no confirmation: the conversation is cleared on the spot."""
+    conversation.reset("u-exit")
+    conversation.handle_message("u-exit", text="what am I entitled to?")
+    conversation.handle_message("u-exit", text="what am I entitled to?")
+    assert conversation._SESSIONS["u-exit"].query
+
+    replies = conversation.handle_message("u-exit", text="restart")
+    session = conversation._SESSIONS["u-exit"]
+    assert session.query == ""
+    assert session.context == conversation.DEFAULT_CONTEXT_ANCHOR
+    assert session.step is conversation.Step.QUERY
+    assert replies[0].buttons is None, "no confirmation buttons any more"
+
+
+def test_restart_keeps_the_language(fake_pipeline):
+    """The language was detected, not part of what the user asked to clear —
+    and a confirmation nobody can read is a poor way to start over."""
+    conversation.reset("u-yes")
+    conversation.handle_message("u-yes", text="what am I entitled to?")
+    conversation._SESSIONS["u-yes"].language = Language.ENGLISH
+
+    replies = conversation.handle_message("u-yes", text="reset")
+    assert conversation._SESSIONS["u-yes"].language is Language.ENGLISH
+    assert TEXTS[Language.ENGLISH].RESTART_DONE.value in replies[0].body
+
+
+def test_restart_works_from_any_step(fake_pipeline):
+    """Including mid-refine, where a stale context would otherwise persist."""
+    conversation.reset("u-mid")
+    conversation.handle_message("u-mid", text="what am I entitled to?")
+    conversation.handle_message("u-mid", text="what am I entitled to?")
+    conversation._SESSIONS["u-mid"].step = conversation.Step.REFINE
+    conversation.handle_message("u-mid", text="/reset")
+    assert conversation._SESSIONS["u-mid"].step is conversation.Step.QUERY
+
+
+def test_a_question_containing_an_exit_word_is_not_eaten(fake_pipeline):
+    """Exact-match only — "stop" inside a real sentence must stay a question."""
+    conversation.reset("u-word")
+    conversation.handle_message("u-word", text="hello")
+    replies = conversation.handle_message(
+        "u-word", text="can my employer stop paying me while I recover?"
+    )
+    assert any("answer[" in r.body for r in replies)

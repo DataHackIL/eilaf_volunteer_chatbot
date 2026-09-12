@@ -29,6 +29,13 @@ Each optional step offers a **Skip** button; the collected answers become the
 same ``facts`` dict the Streamlit app builds (``streamlit_app.py`` ~L146), then
 we call the shared pipeline and reply in the user's language.
 
+A conversation ends in one of three ways: the user types a restart keyword
+(``exit``, ``restart``, ``איפוס``, ``خروج``, …  — matched exactly, acted on
+immediately, no confirmation), it goes idle for ``config.SESSION_TTL_SECONDS``
+(default 3h), or the process restarts. The TTL is also the only bound on
+``_SESSIONS``: nothing else ever removes an entry, so without it the dict grows
+once per wa_id for the life of the process.
+
 State is in-memory (``_SESSIONS``); it is per-process and resets on restart,
 which is fine for the single-process interim deployment. Swapping it for SQLite
 later is a localized change. ``handle_message`` is synchronous and may call the
@@ -37,6 +44,7 @@ later is a localized change. ``handle_message`` is synchronous and may call the
 
 from __future__ import annotations
 
+import time
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from enum import Enum, auto
@@ -80,6 +88,20 @@ _LANGUAGE_KEYWORDS = frozenset(
 )
 
 
+# Typing one of these restarts the conversation, at any step. Matched exactly (after
+# strip/lower) for the same reason as the language keywords: a real question
+# containing "stop" or "חדש" must never be swallowed. Deliberately excludes bare
+# "new"/"חדש"/"جديد" — too easy to hit inside an ordinary sentence fragment.
+_RESTART_KEYWORDS = frozenset(
+    {
+        "יציאה", "צא", "סיום", "איפוס", "התחל מחדש", "להתחיל מחדש", "לאפס",
+        "خروج", "إنهاء", "إعادة", "إعادة تشغيل", "من البداية", "إعادة البدء",
+        "exit", "quit", "stop", "reset", "restart", "start over",
+        "/reset", "/restart", "/exit", "/quit",
+    }
+)
+
+
 class Step(Enum):
     WELCOME = auto()  # first contact: detect the language
     QUERY = auto()  # the steady state — a message is a question, answered at once
@@ -92,6 +114,9 @@ class Step(Enum):
 
 @dataclass
 class Session:
+    # Monotonic, not wall-clock: only elapsed time matters here, and monotonic
+    # cannot jump backwards on an NTP correction and strand a live session.
+    last_seen: float = field(default_factory=time.monotonic)
     step: Step = Step.WELCOME
     language: Language = DEFAULT_LANGUAGE
     # The opening message, held until the question arrives and prepended to it.
@@ -112,6 +137,27 @@ class Reply:
 # In-memory per-user state. Process-global, resets on restart.
 _SESSIONS: dict[str, Session] = {}
 
+# Sweeping every message would be O(len(_SESSIONS)) per turn for no benefit —
+# a user's own stale session is caught by the per-user check in handle_message
+# regardless. This sweep exists only to stop the dict growing without bound, so
+# running it occasionally is enough.
+_SWEEP_INTERVAL_SECONDS = 60.0
+_last_sweep: float = 0.0
+
+
+def _is_expired(session: Session, now: float) -> bool:
+    return now - session.last_seen >= config.SESSION_TTL_SECONDS
+
+
+def _sweep(now: float) -> None:
+    """Drop every session idle past the TTL. Throttled; safe to call often."""
+    global _last_sweep
+    if now - _last_sweep < _SWEEP_INTERVAL_SECONDS:
+        return
+    _last_sweep = now
+    for wa_id in [k for k, s in _SESSIONS.items() if _is_expired(s, now)]:
+        del _SESSIONS[wa_id]
+
 
 def reset(wa_id: str) -> None:
     """Drop a user's state (e.g. for tests or an explicit restart)."""
@@ -127,7 +173,28 @@ def handle_message(
     interactive reply) is normally set. Unrecognised input at a step simply
     re-prompts that step.
     """
-    session = _SESSIONS.setdefault(wa_id, Session())
+    now = time.monotonic()
+    _sweep(now)
+
+    # A conversation that has been idle past the TTL is not resumed: the next
+    # message starts a new one. Someone coming back hours later is asking a
+    # fresh question, and silently answering it against stale context (a prior
+    # query, a described event) is worse than starting over.
+    session = _SESSIONS.get(wa_id)
+    if session is not None and _is_expired(session, now):
+        del _SESSIONS[wa_id]
+        session = None
+    if session is None:
+        session = _SESSIONS[wa_id] = Session()
+    session.last_seen = now
+
+    # Restart is handled ahead of the step dispatch, like language below, so it
+    # works from any step. An exact keyword match restarts immediately: there is
+    # no confirmation and no attempt to infer the intent from free text, because
+    # a wrong guess either wipes a conversation nobody asked to end or adds a
+    # round-trip to every user who typed the word deliberately.
+    if text and text.strip().lower() in _RESTART_KEYWORDS:
+        return _restart(wa_id, session)
 
     # Language changes are handled ahead of the step dispatch: a WhatsApp button
     # stays tappable in the chat history, so ``lang:`` can arrive many turns
@@ -184,6 +251,22 @@ def _switch_language(session: Session, code: str) -> list[Reply]:
         # there is no question to collect yet — just move on to asking for one.
         session.step = Step.QUERY
     return _reprompt(session)
+
+
+def _restart(wa_id: str, session: Session) -> list[Reply]:
+    """Drop the conversation and start a new one, keeping the language.
+
+    The language is carried across deliberately: it was detected or chosen, not
+    part of what the user asked to clear, and a confirmation the user cannot
+    read is a poor way to begin.
+    """
+    language = session.language
+    reset(wa_id)
+    fresh = _SESSIONS[wa_id] = Session()
+    fresh.language = language
+    fresh.step = Step.QUERY  # language is known; nothing to detect
+    t = TEXTS[language]
+    return [Reply(f"{t.RESTART_DONE.value}\n\n{t.QUERY_PROMPT.value}")]
 
 
 def _language_buttons() -> list[tuple[str, str]]:

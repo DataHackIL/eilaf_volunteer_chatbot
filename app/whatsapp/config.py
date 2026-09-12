@@ -35,6 +35,12 @@ APP_ID = os.environ.get("WHATSAPP_APP_ID", "")
 # checks below — unset (the default) keeps local/offline runs permissive.
 ENV = os.environ.get("EILAF_ENV", "")
 
+# How long a conversation survives without a message before it is dropped and
+# the next message starts fresh. Sessions are in-memory and never shrink on
+# their own, so this is both a UX choice (a question hours later is a new
+# conversation, not a continuation) and the only bound on _SESSIONS growth.
+SESSION_TTL_SECONDS = int(os.environ.get("EILAF_SESSION_TTL", 3 * 60 * 60))
+
 # Restores the old fact-collecting flow (event → gender → age before answering).
 # Off by default: the corpus carries almost no age/gender/locality tags, so
 # ``SoftMetadataFilter`` does nothing with the answers and the three turns only

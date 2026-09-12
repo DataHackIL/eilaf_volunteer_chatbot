@@ -11,6 +11,8 @@ from __future__ import annotations
 import hashlib
 import hmac
 import importlib
+import logging
+import time
 
 import httpx
 
@@ -543,3 +545,31 @@ def test_dev_serves_on_a_rejected_token(monkeypatch):
 def test_seconds_left_is_none_when_the_token_never_expires():
     assert client.TokenStatus(True, 0, "ok").seconds_left is None
     assert client.TokenStatus(True, None, "ok").seconds_left is None
+
+
+def test_boot_check_actually_logs_the_token_lifetime(monkeypatch, caplog):
+    """The healthy path must *reach a handler*, not just avoid raising.
+
+    This regressed once invisibly: the check ran, decided the token was fine,
+    and logged at INFO to a logger whose records propagated to a handler-less
+    root — so `docker compose logs` showed nothing and there was no way to tell
+    the check had run. Asserting on the exception paths alone missed it.
+    """
+    expires = int(time.time()) + 30 * 86400 + 3600
+    monkeypatch.setattr(
+        server.client, "check_token", lambda: client.TokenStatus(True, expires, "ok")
+    )
+    with caplog.at_level(logging.INFO, logger="whatsapp"):
+        server._check_access_token()
+    assert "expires in 30 days" in caplog.text
+
+
+def test_boot_check_warns_when_expiry_is_close(monkeypatch, caplog):
+    expires = int(time.time()) + 3 * 86400
+    monkeypatch.setattr(
+        server.client, "check_token", lambda: client.TokenStatus(True, expires, "ok")
+    )
+    with caplog.at_level(logging.INFO, logger="whatsapp"):
+        server._check_access_token()
+    assert "rotate it" in caplog.text
+    assert any(r.levelno == logging.WARNING for r in caplog.records)

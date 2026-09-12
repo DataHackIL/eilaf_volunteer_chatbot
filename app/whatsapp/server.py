@@ -19,6 +19,7 @@ import hashlib
 import hmac
 import json
 import logging
+import os
 from collections.abc import Iterator
 from contextlib import asynccontextmanager
 
@@ -29,6 +30,16 @@ from app.whatsapp import client, config
 from app.whatsapp.conversation import Reply, handle_message
 from app.whatsapp.pipeline_singleton import get_pipeline
 
+# uvicorn configures its own loggers but leaves the ROOT logger bare, so records
+# from this one propagate to a handler-less root: anything below WARNING is
+# dropped and never reaches `docker compose logs`. That silently hid the boot
+# check's "token ok, expires in N days" line — the half of the check that tells
+# you it ran at all. basicConfig is a no-op when handlers already exist, so this
+# defers to any real logging config rather than fighting it.
+logging.basicConfig(
+    level=os.environ.get("EILAF_LOG_LEVEL", "INFO"),
+    format="%(levelname)s:     %(name)s: %(message)s",
+)
 logger = logging.getLogger("whatsapp")
 
 

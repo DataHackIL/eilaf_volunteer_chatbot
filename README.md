@@ -12,12 +12,19 @@ The env is placed under `$ENVS_DIR` if that variable is set, otherwise in the
 project directory (`./eilaf`):
 
 ```bash
-UV_PROJECT_ENVIRONMENT="${ENVS_DIR:-.}/eilaf" uv sync
+UV_PROJECT_ENVIRONMENT="${ENVS_DIR:-.}/eilaf" uv sync --all-extras
 ```
 
 `uv` reads the venv location from the `UV_PROJECT_ENVIRONMENT` environment
 variable (it can't be a conditional path in `pyproject.toml`), and
 `${ENVS_DIR:-.}` expands to `$ENVS_DIR` when set and `.` otherwise.
+
+**`--all-extras` matters on a dev machine.** Two units live in optional
+extras so the WhatsApp image doesn't carry them — `apps` (Streamlit, for
+`app/visualizer`) and `stt` (faster-whisper, for `transcription/`). A bare
+`uv sync` gives you the scraping, retrieval and WhatsApp stack but **no
+Streamlit**, and `streamlit run …` will fail with `ModuleNotFoundError`. Take
+one extra with `--extra apps` if you'd rather not pull ctranslate2.
 
 > **GPU note:** the lock pins the default PyPI `torch`. On a CUDA machine,
 > add the appropriate `[tool.uv.sources]` / index for the `cuXXX` wheels

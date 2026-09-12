@@ -31,6 +31,11 @@ COPY pyproject.toml uv.lock README.md ./
 # untouched (its CUDA lock keeps working on the GPU dev machine).
 RUN printf '\n[[tool.uv.index]]\nname = "pytorch-cpu"\nurl = "https://download.pytorch.org/whl/cpu"\nexplicit = true\n\n[tool.uv.sources]\ntorch = [{ index = "pytorch-cpu" }]\n' >> pyproject.toml \
     && uv add --no-sync torch
+# No `--extra`: the `apps` (streamlit) and `stt` (faster-whisper) extras stay
+# out of the image on purpose — the webhook server imports neither, and they
+# pull 616 MB of wheels (pyarrow, pandas, ctranslate2, onnxruntime), measured as
+# 2119 MB -> 1503 MB of site-packages. Adding an `--extra` here is how that
+# creeps back in; new *server* dependencies belong in the base set instead.
 RUN uv sync --no-install-project --no-dev
 
 # Copy only the source packages — NOT the manifests, which would revert the CPU

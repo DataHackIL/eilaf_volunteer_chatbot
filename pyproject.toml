@@ -4,8 +4,14 @@ version = "0.1.0"
 description = "RAG-based volunteer chatbot for Eilaf (Hebrew now, Arabic later), with scraping, embedding, and speech-to-text units."
 readme = "README.md"
 requires-python = ">=3.11"
+# Everything here is installed in the WhatsApp container (app/whatsapp/Dockerfile
+# runs a plain `uv sync --no-dev`, i.e. no extras). Anything a *front-end* or a
+# side unit needs — and the server does not — belongs in the extras below, where
+# it stays out of the image. See the note there before adding a heavy dependency.
 dependencies = [
-    # data scraping / documents
+    # data scraping / documents. python-docx and pymupdf are NOT curation-only:
+    # chatbot/rag/documents/documents.py imports them at module level, so the
+    # retrieval core needs them even when nothing is being scraped.
     "beautifulsoup4",   # bs4
     "requests",
     "python-docx",      # docx
@@ -13,23 +19,32 @@ dependencies = [
     # rag
     "numpy",
     "sentence-transformers",
-    # enrichment / LLM (Claude via the official SDK; pydantic for the
-    # structured-output schema; dotenv loads the API key from a local .env)
+    # enrichment / LLM. Both halves ship: data/enrich/* drives the boot-time
+    # curation pass, chatbot/rag/generator/* is the live answer head. pydantic
+    # for the structured-output schema; dotenv loads the keys from a local .env.
     "anthropic",
     # OpenAI-compatible chat endpoints (Cerebras / Groq / OpenRouter free tiers).
     "openai",
+    "google-genai>=2.12.1",
     "pydantic",
     "python-dotenv",
-    # apps
-    "streamlit",
     # whatsapp front-end (webhook server + outbound Cloud API calls)
     "fastapi",
     "uvicorn[standard]",
     "httpx",
-    # speech-to-text
-    "faster-whisper",
-    "google-genai>=2.12.1",
 ]
+
+# Opt-in units. The WhatsApp webhook server imports neither, and together they
+# pull 616 MB of wheels into an image that would never touch them — pyarrow and
+# pandas behind streamlit, ctranslate2 and onnxruntime behind faster-whisper.
+# (Measured: site-packages in the container went 2119 MB -> 1503 MB when these
+# two moved out here.) On a dev machine take them all: `uv sync --all-extras`.
+[project.optional-dependencies]
+# The Streamlit front-ends: app/visualizer (the RAG explorer) and app/stt_eval.
+apps = ["streamlit"]
+# The transcription/ unit, which merges in on its own branch (see the packages
+# note below — `find` tolerates it being absent).
+stt = ["faster-whisper"]
 
 [build-system]
 requires = ["setuptools>=68"]

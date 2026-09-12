@@ -544,7 +544,6 @@ dependencies = [
     { name = "anthropic" },
     { name = "beautifulsoup4" },
     { name = "fastapi" },
-    { name = "faster-whisper" },
     { name = "google-genai" },
     { name = "httpx" },
     { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
@@ -556,8 +555,15 @@ dependencies = [
     { name = "python-dotenv" },
     { name = "requests" },
     { name = "sentence-transformers" },
-    { name = "streamlit" },
     { name = "uvicorn", extra = ["standard"] },
+]
+
+[package.optional-dependencies]
+apps = [
+    { name = "streamlit" },
+]
+stt = [
+    { name = "faster-whisper" },
 ]
 
 [package.dev-dependencies]
@@ -570,7 +576,7 @@ requires-dist = [
     { name = "anthropic" },
     { name = "beautifulsoup4" },
     { name = "fastapi" },
-    { name = "faster-whisper" },
+    { name = "faster-whisper", marker = "extra == 'stt'" },
     { name = "google-genai", specifier = ">=2.12.1" },
     { name = "httpx" },
     { name = "numpy" },
@@ -581,9 +587,10 @@ requires-dist = [
     { name = "python-dotenv" },
     { name = "requests" },
     { name = "sentence-transformers" },
-    { name = "streamlit" },
+    { name = "streamlit", marker = "extra == 'apps'" },
     { name = "uvicorn", extras = ["standard"] },
 ]
+provides-extras = ["apps", "stt"]
 
 [package.metadata.requires-dev]
 dev = [{ name = "pytest", specifier = ">=9.1.1" }]

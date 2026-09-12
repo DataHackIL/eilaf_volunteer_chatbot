@@ -167,6 +167,37 @@ Leave it unset locally — nothing changes and the offline flow keeps working.
 > reuses the old container's environment. Use
 > `docker compose up -d --force-recreate chatbot`.
 
+### Deploying to a remote host (`scripts/deploy.sh`)
+
+Everything above runs the stack on the machine you are sitting at.
+`scripts/deploy.sh` does the same thing on an EC2 box over SSH:
+
+```bash
+./scripts/deploy.sh --bootstrap -i ~/.aws/eilaf-chatbot.pem 16.171.9.191   # first time
+./scripts/deploy.sh -i ~/.aws/eilaf-chatbot.pem 16.171.9.191               # every time after
+```
+
+It pre-flights locally (all four `WHATSAPP_*` keys present, corpus non-empty),
+rsyncs the working tree, brings the stack up with `EILAF_ENV=prod`, and prints
+the tunnel URL for the Meta webhook config. `--help` lists the rest
+(`-u ec2-user` for Amazon Linux, `--no-build`, `--skip-corpus`).
+
+Two things it exists to get right:
+
+- **`data/static/` is not in git.** `.gitignore` excludes the corpus `.json`
+  files and `.embeddings/`, so a `git clone` on the instance yields a bot that
+  answers from nothing. The script rsyncs the store (~47 MB) alongside the code
+  — including the embedding cache, without which the first query re-encodes the
+  whole corpus on the instance's CPU.
+- **Code ships by rsync, not `git pull`.** The instance needs no GitHub
+  credentials, and what runs is exactly your working tree — which also means a
+  dirty tree deploys dirty. The script warns and continues.
+
+> **Sizing.** The retrieval core loads `multilingual-e5-large`, whose weights
+> are a single 2.1 GB file, so the steady-state footprint is ~3 GB. A 1 GB
+> `t3.micro` cannot load the model at all; `t3.medium` (4 GB) is the realistic
+> floor, with 30 GB of disk for the image, weights and corpus.
+
 ### Running without Docker (alternative)
 ```bash
 python -m app.whatsapp.server          # uvicorn on :8000

@@ -652,7 +652,7 @@ def test_restart_keeps_the_language(fake_pipeline):
     conversation.handle_message("u-yes", text="what am I entitled to?")
     conversation._SESSIONS["u-yes"].language = Language.ENGLISH
 
-    replies = conversation.handle_message("u-yes", text="reset")
+    replies = conversation.handle_message("u-yes", text="restart")
     assert conversation._SESSIONS["u-yes"].language is Language.ENGLISH
     assert TEXTS[Language.ENGLISH].RESTART_DONE.value in replies[0].body
 
@@ -663,7 +663,7 @@ def test_restart_works_from_any_step(fake_pipeline):
     conversation.handle_message("u-mid", text="what am I entitled to?")
     conversation.handle_message("u-mid", text="what am I entitled to?")
     conversation._SESSIONS["u-mid"].step = conversation.Step.REFINE
-    conversation.handle_message("u-mid", text="/reset")
+    conversation.handle_message("u-mid", text="התחל מחדש")
     assert conversation._SESSIONS["u-mid"].step is conversation.Step.QUERY
 
 
@@ -675,3 +675,29 @@ def test_a_question_containing_an_exit_word_is_not_eaten(fake_pipeline):
         "u-word", text="can my employer stop paying me while I recover?"
     )
     assert any("answer[" in r.body for r in replies)
+
+
+def test_only_the_three_documented_phrases_restart(fake_pipeline):
+    """Synonyms must NOT restart: the phrase is advertised, and destructive."""
+    for phrase in ("reset", "exit", "quit", "stop", "/restart", "איפוס", "خروج"):
+        conversation.reset("u-syn")
+        conversation.handle_message("u-syn", text="what am I entitled to?")
+        conversation.handle_message("u-syn", text="what am I entitled to?")
+        conversation.handle_message("u-syn", text=phrase)
+        assert conversation._SESSIONS["u-syn"].query, f"{phrase!r} wrongly restarted"
+
+
+def test_each_language_phrase_restarts(fake_pipeline):
+    for phrase in ("restart", "התחל מחדש", "من البداية"):
+        conversation.reset("u-lang")
+        conversation.handle_message("u-lang", text="what am I entitled to?")
+        conversation.handle_message("u-lang", text="what am I entitled to?")
+        conversation.handle_message("u-lang", text=phrase)
+        assert conversation._SESSIONS["u-lang"].query == "", f"{phrase!r} did not restart"
+
+
+def test_welcome_tells_the_user_how_to_restart(fake_pipeline):
+    """The phrase is only discoverable if we say it — so assert we do."""
+    conversation.reset("u-hint")
+    replies = conversation.handle_message("u-hint", text="hello")
+    assert TEXTS[Language.ENGLISH].RESTART_HINT.value in replies[0].body

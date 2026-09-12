@@ -30,8 +30,8 @@ same ``facts`` dict the Streamlit app builds (``streamlit_app.py`` ~L146), then
 we call the shared pipeline and reply in the user's language.
 
 A conversation ends in one of three ways: the user types a restart keyword
-(``exit``, ``restart``, ``איפוס``, ``خروج``, …  — matched exactly, acted on
-immediately, no confirmation), it goes idle for ``config.SESSION_TTL_SECONDS``
+(one phrase per language — ``restart`` / ``התחל מחדש`` / ``من البداية`` — named
+in the welcome message, matched exactly, acted on at once, no confirmation), it goes idle for ``config.SESSION_TTL_SECONDS``
 (default 3h), or the process restarts. The TTL is also the only bound on
 ``_SESSIONS``: nothing else ever removes an entry, so without it the dict grows
 once per wa_id for the life of the process.
@@ -88,16 +88,15 @@ _LANGUAGE_KEYWORDS = frozenset(
 )
 
 
-# Typing one of these restarts the conversation, at any step. Matched exactly (after
-# strip/lower) for the same reason as the language keywords: a real question
-# containing "stop" or "חדש" must never be swallowed. Deliberately excludes bare
-# "new"/"חדש"/"جديد" — too easy to hit inside an ordinary sentence fragment.
+# Exactly one phrase per language, and the welcome message names it. Matched
+# exactly (after strip/lower), so a real question containing "restart" is still
+# a question. A restart is destructive with no undo, so the list is deliberately
+# short and explicit rather than a set of synonyms someone could hit by accident.
 _RESTART_KEYWORDS = frozenset(
     {
-        "יציאה", "צא", "סיום", "איפוס", "התחל מחדש", "להתחיל מחדש", "לאפס",
-        "خروج", "إنهاء", "إعادة", "إعادة تشغيل", "من البداية", "إعادة البدء",
-        "exit", "quit", "stop", "reset", "restart", "start over",
-        "/reset", "/restart", "/exit", "/quit",
+        "restart",
+        "התחל מחדש",
+        "من البداية",
     }
 )
 
@@ -235,7 +234,12 @@ def _handle_welcome(session: Session, text: str | None) -> list[Reply]:
 
     t = TEXTS[session.language]
     body = "\n\n".join(
-        (t.WELCOME.value, t.QUERY_PROMPT.value, t.CHANGE_LANGUAGE.value)
+        (
+            t.WELCOME.value,
+            t.QUERY_PROMPT.value,
+            t.CHANGE_LANGUAGE.value,
+            t.RESTART_HINT.value,
+        )
     )
     return [Reply(body, buttons=_switch_buttons(session.language))]
 

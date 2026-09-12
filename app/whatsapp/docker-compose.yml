@@ -45,16 +45,29 @@ services:
 
   tunnel:
     image: cloudflare/cloudflared:latest
-    command: tunnel --no-autoupdate --url http://chatbot:8000
+    # Two modes, selected by the two variables below.
+    #
+    # DEFAULT — quick tunnel. Zero setup, but the hostname is random and changes
+    # on every restart of this container, including an unattended reboot. Each
+    # change silently deafens the bot: Meta keeps reporting a healthy callback
+    # URL while every message goes to a hostname that no longer exists.
+    #
+    # NAMED TUNNEL — a stable hostname. Set BOTH together:
+    #   TUNNEL_TOKEN=<token from the Cloudflare dashboard>
+    #   TUNNEL_RUN_ARGS=run
+    # then `docker compose up -d`. Setting only one is the failure to watch for:
+    # a token without `run` silently stays on a quick tunnel, and `run` without a
+    # token exits immediately (the logs say so plainly).
+    #
+    # Prerequisite: a named tunnel serves a hostname from a DNS zone you control,
+    # so this needs a domain added to Cloudflare. Without one it cannot give you
+    # a stable public URL — see SETUP.md for the alternatives.
+    command: tunnel --no-autoupdate ${TUNNEL_RUN_ARGS:---url http://chatbot:8000}
+    environment:
+      TUNNEL_TOKEN: "${TUNNEL_TOKEN:-}"
     depends_on:
       - chatbot
     restart: unless-stopped
-    # For a STABLE URL (survives restarts, register the webhook once) instead of
-    # a random trycloudflare.com hostname: create a named tunnel in the Cloudflare
-    # dashboard and run it with its token —
-    #   command: tunnel --no-autoupdate run
-    #   environment:
-    #     - TUNNEL_TOKEN=${TUNNEL_TOKEN}
 
 volumes:
   hf-cache:

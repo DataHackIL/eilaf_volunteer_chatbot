@@ -174,6 +174,46 @@ Leave it unset locally — nothing changes and the offline flow keeps working.
 > reuses the old container's environment. Use
 > `docker compose up -d --force-recreate chatbot`.
 
+### Getting a stable public URL (the tunnel problem)
+
+The default quick tunnel hands you a random `trycloudflare.com` hostname that
+changes **every time the tunnel container restarts** — including an unattended
+reboot. This is the single most disruptive thing about the current setup: the
+new URL is never registered with Meta, so the bot keeps receiving nothing while
+the dashboard still reports a healthy webhook. It happened three times in one
+day during the first live run.
+
+**A named Cloudflare tunnel needs a domain.** The stable hostname comes from a
+DNS zone you control (`bot.example.org`), so this only works once you or Eilaf
+have a domain added to Cloudflare. With one:
+
+1. Cloudflare dashboard → **Zero Trust → Networks → Tunnels → Create a tunnel**
+2. Choose **Cloudflared**, name it, copy the **token**
+3. Add a **Public hostname**: your subdomain → `http://chatbot:8000`
+4. Run with both variables set:
+
+```bash
+TUNNEL_TOKEN=<token> TUNNEL_RUN_ARGS=run docker compose up -d
+```
+
+Set them together — a token without `TUNNEL_RUN_ARGS=run` silently stays on a
+quick tunnel, which is exactly the failure this is meant to end.
+
+**Without a domain**, a named tunnel cannot help, and the options are:
+
+| Option | Stable hostname | Notes |
+|---|---|---|
+| Register a domain | `bot.yourdomain.org` | ~$10/yr; also unlocks the direct-HTTPS route below |
+| ngrok | `<name>.ngrok-free.app` | free tier includes one static domain |
+| Tailscale Funnel | `<host>.<tailnet>.ts.net` | free, valid cert, no domain needed |
+
+**Or skip tunnels entirely.** Once the bot lives on EC2 with an Elastic IP and
+you have a domain, point an A record at it and terminate TLS on the box (Caddy
+with Let's Encrypt, DNS-01 so only 443 is open). Meta requires HTTPS with a
+CA-signed certificate, so a bare IP is never enough — but note that a domain is
+the prerequisite for *both* paths. If you are going to need one anyway, the
+direct route removes a moving part rather than stabilising it.
+
 ### When the access token dies (it fails silently)
 
 An expired or under-scoped access token is the nastiest failure mode here,

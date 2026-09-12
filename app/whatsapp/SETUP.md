@@ -3,13 +3,21 @@
 This is the WhatsApp front-end for the Eilaf RAG pipeline. It runs a webhook
 server that mirrors the Streamlit app as a multi-turn WhatsApp chat:
 
-> question (language auto-detected) → violent-event description → gender → age → answer
+> question → answer (language auto-detected; event details optional, on request)
 
 The language is guessed from the script of the user's first message (Hebrew,
 Arabic, or English; Hebrew when there is no signal), so there is no language menu
 to get through — the opening message is kept and prepended to the question. A
 wrong guess is corrected with the two buttons on the welcome message, or by
 typing `שפה` / `لغة` / `language` at any point.
+
+A question is answered on the turn it arrives. Every answer carries an **Add
+details** button: tapping it asks for a few words about the event and re-answers
+the same question with that as the retrieval anchor. Setting
+`WHATSAPP_COLLECT_FACTS=1` restores the older flow, which asked for the event
+description, gender and age *before* answering — off by default because the
+corpus carries almost no age/gender/locality tags, so those answers changed
+nothing and only delayed the reply.
 
 This guide takes you from a Meta developer account to a working bot on your own
 machine, exposed to Meta through a tunnel. No paid hosting required.
@@ -45,6 +53,7 @@ You need four values, all injected via the repo-root `.env` (never committed):
 | `WHATSAPP_VERIFY_TOKEN`      | A string **you invent** (webhook handshake) |
 | `WHATSAPP_APP_SECRET`        | App Secret (validates incoming webhooks)    |
 | `WHATSAPP_APP_ID`            | App ID — *optional*, see below              |
+| `WHATSAPP_COLLECT_FACTS`     | `1` restores the pre-answer fact questions  |
 
 `WHATSAPP_APP_ID` is not a secret and nothing needs it to run. Set it and the
 boot-time check and `scripts/deploy.sh` can report **how long the access token

@@ -35,6 +35,12 @@ APP_ID = os.environ.get("WHATSAPP_APP_ID", "")
 # checks below — unset (the default) keeps local/offline runs permissive.
 ENV = os.environ.get("EILAF_ENV", "")
 
+# Restores the old fact-collecting flow (event → gender → age before answering).
+# Off by default: the corpus carries almost no age/gender/locality tags, so
+# ``SoftMetadataFilter`` does nothing with the answers and the three turns only
+# delay the answer. Turn it on once an enrichment pass populates those tags.
+COLLECT_FACTS = os.environ.get("WHATSAPP_COLLECT_FACTS", "") == "1"
+
 
 def require(name: str, value: str) -> str:
     """Return ``value`` or raise if it's empty — a clear miss-config message."""

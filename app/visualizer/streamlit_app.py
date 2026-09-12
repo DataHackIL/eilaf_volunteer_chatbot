@@ -36,12 +36,12 @@ load_dotenv(Path(__file__).resolve().parents[2] / ".env")
 lang: Language = st.session_state.get("language", Language.HEBREW)
 T = TEXTS[lang]
 
-st.set_page_config(page_title=T.TITLE.value, page_icon="🤝")
+st.set_page_config(page_title=T.TITLE.value)
 
 # Language switch. The widget writes back to `st.session_state["language"]`,
 # so the next rerun picks up the choice at the top of the script.
 lang = st.sidebar.selectbox(
-    "🌐",
+    T.LANGUAGE_LABEL.value,
     options=list(Language),
     format_func=lambda language: language.native_name,
     key="language",

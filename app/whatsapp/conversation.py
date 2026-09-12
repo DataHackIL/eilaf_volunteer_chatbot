@@ -4,7 +4,17 @@ WhatsApp has no equivalent of Streamlit's ``st.session_state``, so we keep our
 own per-user state (keyed by the sender's WhatsApp id, ``wa_id``) and serialize
 the Streamlit app's one-page inputs into a multi-turn dialog:
 
-    question (language auto-detected) → violent-event description → gender → age → answer
+    question → answer (language auto-detected; event details optional, on request)
+
+A question is answered on the turn it arrives. The old forced follow-ups —
+violent-event description, gender, age — are gone from the default path: the
+corpus carries almost no age/gender/locality tags, so ``SoftMetadataFilter`` did
+nothing with two of the three answers, and they only delayed the answer. They
+remain behind ``WHATSAPP_COLLECT_FACTS=1`` for the day an enrichment pass
+populates those tags. The event description *does* move retrieval (it replaces
+``DEFAULT_CONTEXT_ANCHOR`` in the anchor blend), so it survives as an opt-in:
+every answer offers an **Add details** button which re-runs the same question
+against whatever the user then describes.
 
 Language is **not** a step. Asking "which language?" costs a whole turn before
 the user can say anything useful, and their opening message already answers it —
@@ -33,11 +43,13 @@ from enum import Enum, auto
 
 from app.language import detect_language
 from app.visualizer.i18n import TEXTS, Language
+from app.whatsapp import config
 from app.whatsapp.pipeline_singleton import get_pipeline
 from chatbot.rag.pipeline.pipeline import DEFAULT_CONTEXT_ANCHOR
 
 # Button ids (echoed back by WhatsApp as interactive ``button_reply.id``).
 _SKIP = "skip"
+_REFINE = "refine"
 _LANG_PREFIX = "lang:"
 _GENDER_PREFIX = "gender:"
 
@@ -69,8 +81,10 @@ _LANGUAGE_KEYWORDS = frozenset(
 
 
 class Step(Enum):
-    WELCOME = auto()
-    QUERY = auto()
+    WELCOME = auto()  # first contact: detect the language
+    QUERY = auto()  # the steady state — a message is a question, answered at once
+    REFINE = auto()  # opt-in: the user tapped "Add details" after an answer
+    # Reached only under ``config.COLLECT_FACTS``.
     EVENT = auto()
     GENDER = auto()
     AGE = auto()
@@ -124,10 +138,19 @@ def handle_message(
     if text and text.strip().lower() in _LANGUAGE_KEYWORDS:
         return [Reply(LANGUAGE_PROMPT, buttons=_language_buttons())]
 
+    # "Add details" travels the same way, and needs a question to refine: a tap
+    # on an answer this process no longer remembers (a restart wiped the
+    # session) falls through to asking for one rather than answering nothing.
+    if button_id == _REFINE and session.query:
+        session.step = Step.REFINE
+        return _reprompt(session)
+
     if session.step is Step.WELCOME:
         return _handle_welcome(session, text)
     if session.step is Step.QUERY:
         return _handle_query(session, text)
+    if session.step is Step.REFINE:
+        return _handle_refine(session, text)
     if session.step is Step.EVENT:
         return _handle_event(session, text, button_id)
     if session.step is Step.GENDER:
@@ -184,8 +207,18 @@ def _handle_query(session: Session, text: str | None) -> list[Reply]:
         return _reprompt(session)
     session.query = " ".join(p for p in (session.pending_query, new_text) if p)
     session.pending_query = ""  # consumed; later questions stand alone
+    if not config.COLLECT_FACTS:
+        return _run_pipeline(session)
     session.step = Step.EVENT
     return _reprompt(session)
+
+
+def _handle_refine(session: Session, text: str | None) -> list[Reply]:
+    """Re-answer the question we already have, against a described event."""
+    if not text or not text.strip():
+        return _reprompt(session)
+    session.context = text.strip()
+    return _run_pipeline(session)
 
 
 def _handle_event(
@@ -227,6 +260,8 @@ def _reprompt(session: Session) -> list[Reply]:
     switch cannot drift apart.
     """
     t = TEXTS[session.language]
+    if session.step is Step.REFINE:
+        return [Reply(t.EXPAND_PROMPT.value)]
     if session.step is Step.EVENT:
         return [Reply(t.CONTEXT_PROMPT.value, buttons=[(_SKIP, t.SKIP.value)])]
     if session.step is Step.GENDER:
@@ -267,11 +302,15 @@ def _run_pipeline(session: Session) -> list[Reply]:
         body += f"\n\n{t.SOURCES.value}:\n{sources}"
 
     # Keep the language, clear the rest, and go back to accepting a question.
+    # ``query`` deliberately survives: "Add details" re-answers *this* question.
+    # A stale one is harmless — ``_handle_query`` overwrites it.
     session.step = Step.QUERY
-    session.query = ""
     session.context = DEFAULT_CONTEXT_ANCHOR
     session.facts = {}
-    return [Reply(body), Reply(t.ASK_ANOTHER.value)]
+    return [
+        Reply(body),
+        Reply(t.ASK_ANOTHER.value, buttons=[(_REFINE, t.ADD_DETAILS.value)]),
+    ]
 
 
 def _format_sources(contexts: Sequence) -> str:

@@ -33,6 +33,10 @@ services:
       # it at another mount (an EC2 volume, or S3 via mountpoint-s3) to move the
       # whole store — raw/, enriched/ and .embeddings/ follow it together.
       EILAF_STATIC_DIR: "${EILAF_STATIC_DIR:-}"
+      # "1" restores the old fact-collecting turns (event → gender → age before
+      # answering). Off by default: the corpus has almost no age/gender/locality
+      # tags, so the answers changed nothing and only delayed the reply.
+      WHATSAPP_COLLECT_FACTS: "${WHATSAPP_COLLECT_FACTS:-}"
     ports:
       - "8000:8000"
     volumes:

@@ -68,9 +68,11 @@ class HebrewText(Enum):
     GENERATOR_ERROR = "יצירת התשובה נכשלה: {error}"
     # WhatsApp conversation flow.
     SKIP = "דלג"
-    ASK_ANOTHER = "אפשר לשאול שאלה נוספת 🙂"
+    ASK_ANOTHER = "אפשר לשאול שאלה נוספת, או להוסיף פרטים על האירוע כדי לדייק את התשובה."
+    ADD_DETAILS = "הוספת פרטים"
+    EXPAND_PROMPT = "כמה מילים על מה שקרה, ואחזור לתשובה מדויקת יותר."
     INVALID_AGE = "נא להזין גיל תקין (מספר), או ללחוץ על דילוג."
-    WELCOME = "שלום! 👋 אני הצ'אטבוט של אילאף, ואפשר לשאול אותי על זכויות וסיוע לנפגעי אירועי אלימות."
+    WELCOME = "שלום! אני הצ'אטבוט של אילאף, ואפשר לשאול אותי על זכויות וסיוע לנפגעי אירועי אלימות."
     CHANGE_LANGUAGE = "לשינוי שפה: לחצו על אחד הכפתורים, או כתבו \"שפה\" בכל שלב."
 
 
@@ -103,9 +105,11 @@ class ArabicText(Enum):
     GENERATOR_ERROR = "فشل توليد الجواب: {error}"
     # WhatsApp conversation flow.
     SKIP = "تخطّي"
-    ASK_ANOTHER = "فيكم تسألوا سؤال تاني 🙂"
+    ASK_ANOTHER = "فيكم تسألوا سؤال تاني، أو تضيفوا تفاصيل عن الحادثة لتدقيق الجواب."
+    ADD_DETAILS = "إضافة تفاصيل"
+    EXPAND_PROMPT = "احكوا بكلمتين شو صار، ورجّع جواب أدقّ."
     INVALID_AGE = "لطفاً دخّلوا عمر صحيح (رقم)، أو اضغطوا تخطّي."
-    WELCOME = "مرحبا! 👋 أنا الشات بوت تبع إيلاف، وفيكم تسألوني عن الحقوق والمساعدة لمتضرري حوادث العنف."
+    WELCOME = "مرحبا! أنا الشات بوت تبع إيلاف، وفيكم تسألوني عن الحقوق والمساعدة لمتضرري حوادث العنف."
     CHANGE_LANGUAGE = "لتغيير اللغة: اضغطوا على أحد الأزرار، أو اكتبوا \"لغة\" بأي وقت."
 
 
@@ -137,9 +141,11 @@ class EnglishText(Enum):
     GENERATOR_ERROR = "Answer generation failed: {error}"
     # WhatsApp conversation flow.
     SKIP = "Skip"
-    ASK_ANOTHER = "You can ask another question 🙂"
+    ASK_ANOTHER = "You can ask another question, or add details about what happened to sharpen the answer."
+    ADD_DETAILS = "Add details"
+    EXPAND_PROMPT = "A few words about what happened, and I'll give a more precise answer."
     INVALID_AGE = "Please enter a valid age (a number), or tap Skip."
-    WELCOME = "Hi! 👋 I'm the Eilaf chatbot — ask me about the rights of, and support for, victims of violent events."
+    WELCOME = "Hi! I'm the Eilaf chatbot — ask me about the rights of, and support for, victims of violent events."
     CHANGE_LANGUAGE = "To change language: tap one of the buttons, or type \"language\" at any point."
 
 

@@ -17,7 +17,7 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 
-from app.visualizer.i18n import TEXTS, ArabicText, HebrewText, Language
+from app.visualizer.i18n import TEXTS, ArabicText, EnglishText, HebrewText, Language
 from app.whatsapp import client, config, conversation, server
 from chatbot.rag.documents.documents import Document
 
@@ -55,11 +55,11 @@ def _button_ids(reply):
 
 
 # --------------------------------------------------------------------------- #
-# Conversation flow                                                            #
+# Conversation flow — the default, one-turn path                               #
 # --------------------------------------------------------------------------- #
 
 
-def test_happy_path_builds_facts_and_answers(fake_pipeline):
+def test_a_question_is_answered_on_the_turn_it_arrives(fake_pipeline):
     wa = "happy"
     conversation.reset(wa)
 
@@ -69,64 +69,98 @@ def test_happy_path_builds_facts_and_answers(fake_pipeline):
     assert _button_ids(replies[0]) == ["lang:he", "lang:ar"]
     assert "What would you like to ask?" in replies[0].body
 
-    # Ask a question → event step with a Skip button.
+    # The question is answered immediately — no event/gender/age turns.
     replies = conversation.handle_message(wa, text="What am I entitled to?")
-    assert _button_ids(replies[0]) == ["skip"]
-
-    # Type an event description → gender step (Female/Male/Skip).
-    replies = conversation.handle_message(wa, text="assault at home")
-    assert _button_ids(replies[0]) == ["gender:f", "gender:m", "skip"]
-
-    # Female → age step.
-    replies = conversation.handle_message(wa, button_id="gender:f")
-    assert _button_ids(replies[0]) == ["skip"]
-
-    # Age 30 → runs the pipeline; answer + "ask another".
-    replies = conversation.handle_message(wa, text="30")
     assert "answer[English]" in replies[0].body
     assert "benefits.json" in replies[0].body  # sources listed
-    assert len(replies) == 2  # answer + ask-another
+    assert len(replies) == 2  # answer + follow-up
+    # The follow-up offers the one lever that still moves retrieval.
+    assert _button_ids(replies[1]) == ["refine"]
 
     call = fake_pipeline.retrieve_calls[-1]
-    assert call["facts"] == {"gender": "f", "age": 30}
-    assert call["context"] == "assault at home"
+    # Unconstrained, and on the default anchor: exactly what skipping every
+    # question used to produce.
+    assert call["facts"] is None
+    assert call["context"] == "נפגע אירוע אלימות"  # DEFAULT_CONTEXT_ANCHOR
     # The opening message is kept, prepended to the question.
     assert call["query"] == "hi What am I entitled to?"
     # Language threaded into the generator as its English name.
     assert fake_pipeline.generator.last[2] == "English"
 
-    # State reset to accept a new question (language kept).
+    # Back to accepting a new question (language kept).
     assert conversation._SESSIONS[wa].step is conversation.Step.QUERY
 
 
-def test_all_skips_default_context_and_empty_facts(fake_pipeline):
-    wa = "skips"
+def test_add_details_re_answers_the_same_question(fake_pipeline):
+    wa = "refine"
     conversation.reset(wa)
     conversation.handle_message(wa, text="שלום")
-    conversation.handle_message(wa, text="שאלה")
-    conversation.handle_message(wa, button_id="skip")  # event skipped
-    conversation.handle_message(wa, button_id="skip")  # gender skipped
-    conversation.handle_message(wa, button_id="skip")  # age skipped
+    conversation.handle_message(wa, text="מה הזכויות שלי?")
+    assert len(fake_pipeline.retrieve_calls) == 1
 
-    call = fake_pipeline.retrieve_calls[-1]
-    assert call["facts"] is None  # empty facts → None (unconstrained retrieval)
-    assert call["context"] == "נפגע אירוע אלימות"  # DEFAULT_CONTEXT_ANCHOR
+    replies = conversation.handle_message(wa, button_id="refine")
+    assert replies[0].body == HebrewText.EXPAND_PROMPT.value
+    assert conversation._SESSIONS[wa].step is conversation.Step.REFINE
+    assert len(fake_pipeline.retrieve_calls) == 1  # nothing re-run yet
+
+    replies = conversation.handle_message(wa, text="תקיפה בבית")
+    first, second = fake_pipeline.retrieve_calls
+    assert second["query"] == first["query"]  # same question…
+    assert second["context"] == "תקיפה בבית"  # …new anchor
+    assert first["context"] == "נפגע אירוע אלימות"
+    # And the answer is re-issued, itself refinable again.
+    assert _button_ids(replies[1]) == ["refine"]
+    assert conversation._SESSIONS[wa].step is conversation.Step.QUERY
 
 
-def test_invalid_age_reprompts_then_accepts(fake_pipeline):
-    wa = "age"
+def test_add_details_with_nothing_to_refine_asks_for_a_question(fake_pipeline):
+    """A tap on an answer the process no longer remembers (it was restarted).
+
+    Either way the user is asked for a question rather than answered nothing,
+    and the pipeline is never run on an empty query.
+    """
+    # Nothing known at all → the welcome, which carries the question prompt.
+    wa = "refine-cold"
+    conversation.reset(wa)
+    replies = conversation.handle_message(wa, button_id="refine")
+    assert HebrewText.QUERY_PROMPT.value in replies[0].body
+
+    # Past the welcome but with no question yet → the bare question prompt.
+    wa = "refine-no-query"
     conversation.reset(wa)
     conversation.handle_message(wa, text="hello")
-    conversation.handle_message(wa, text="q")
-    conversation.handle_message(wa, button_id="skip")  # event
-    conversation.handle_message(wa, button_id="skip")  # gender
+    replies = conversation.handle_message(wa, button_id="refine")
+    assert replies[0].body == EnglishText.QUERY_PROMPT.value
 
-    replies = conversation.handle_message(wa, text="not-a-number")
-    assert "valid age" in replies[0].body.lower()
-    assert conversation._SESSIONS[wa].step is conversation.Step.AGE  # still on age
+    assert fake_pipeline.retrieve_calls == []
 
-    replies = conversation.handle_message(wa, text="42")
-    assert fake_pipeline.retrieve_calls[-1]["facts"] == {"age": 42}
+
+# Pictographs, dingbats, misc symbols, and the variation selector that turns
+# some of them into emoji. Written as code points so this file does not itself
+# contain what it forbids.
+_EMOJI_RANGES = (
+    (0x1F000, 0x1FAFF),
+    (0x2600, 0x27BF),
+    (0x2B00, 0x2BFF),
+    (0xFE0F, 0xFE0F),
+)
+
+
+def test_no_ui_string_carries_an_emoji():
+    """Emoji are out of place in a service for victims of violence.
+
+    Asserted over every string, not just the follow-up that used to carry one,
+    so a cheerful addition anywhere fails here instead of reaching a user.
+    """
+    offenders = [
+        f"{texts.__name__}.{member.name}"
+        for texts in TEXTS.values()
+        for member in texts
+        if isinstance(member.value, str)
+        for char in member.value
+        if any(low <= ord(char) <= high for low, high in _EMOJI_RANGES)
+    ]
+    assert offenders == []
 
 
 def test_empty_question_reprompts(fake_pipeline):
@@ -173,14 +207,10 @@ def test_a_second_question_is_not_polluted_by_the_greeting(fake_pipeline):
     conversation.reset(wa)
     conversation.handle_message(wa, text="hi")
     conversation.handle_message(wa, text="what am I entitled to?")
-    for _ in range(3):  # event, gender, age
-        conversation.handle_message(wa, button_id="skip")
     assert fake_pipeline.retrieve_calls[-1]["query"] == "hi what am I entitled to?"
 
-    # Back at the question step; the opening message was consumed, not kept.
+    # The opening message was consumed, not kept for every later question.
     conversation.handle_message(wa, text="and who is eligible?")
-    for _ in range(3):
-        conversation.handle_message(wa, button_id="skip")
     assert fake_pipeline.retrieve_calls[-1]["query"] == "and who is eligible?"
 
 
@@ -188,18 +218,16 @@ def test_language_button_switches_without_losing_the_step(fake_pipeline):
     wa = "switch"
     conversation.reset(wa)
     conversation.handle_message(wa, text="hello")
-    conversation.handle_message(wa, text="a question")  # now on the event step
+    conversation.handle_message(wa, text="a question")  # answered
+    conversation.handle_message(wa, button_id="refine")  # now on the refine step
 
     replies = conversation.handle_message(wa, button_id="lang:he")
     assert conversation._SESSIONS[wa].language is Language.HEBREW
     # Same step, re-asked in Hebrew — progress is kept, not restarted.
-    assert conversation._SESSIONS[wa].step is conversation.Step.EVENT
-    assert replies[0].body == HebrewText.CONTEXT_PROMPT.value
-    assert _button_ids(replies[0]) == ["skip"]
+    assert conversation._SESSIONS[wa].step is conversation.Step.REFINE
+    assert replies[0].body == HebrewText.EXPAND_PROMPT.value
 
-    conversation.handle_message(wa, button_id="skip")  # event
-    conversation.handle_message(wa, button_id="skip")  # gender
-    conversation.handle_message(wa, button_id="skip")  # age
+    conversation.handle_message(wa, text="תקיפה בבית")
     # The switch reached the generator: Hebrew, though the question was English.
     assert fake_pipeline.generator.last[2] == "Hebrew"
 
@@ -208,13 +236,14 @@ def test_language_keyword_reopens_the_full_menu_mid_flow(fake_pipeline):
     wa = "keyword"
     conversation.reset(wa)
     conversation.handle_message(wa, text="hello")
-    conversation.handle_message(wa, text="a question")  # event step
+    conversation.handle_message(wa, text="a question")
+    conversation.handle_message(wa, button_id="refine")  # refine step
 
     replies = conversation.handle_message(wa, text="language")
     assert replies[0].body == conversation.LANGUAGE_PROMPT
     assert _button_ids(replies[0]) == ["lang:he", "lang:ar", "lang:en"]
     # The menu itself does not advance or reset the flow.
-    assert conversation._SESSIONS[wa].step is conversation.Step.EVENT
+    assert conversation._SESSIONS[wa].step is conversation.Step.REFINE
 
 
 def test_a_question_mentioning_language_is_not_taken_as_the_keyword(fake_pipeline):
@@ -222,8 +251,8 @@ def test_a_question_mentioning_language_is_not_taken_as_the_keyword(fake_pipelin
     conversation.reset(wa)
     conversation.handle_message(wa, text="hi")
     replies = conversation.handle_message(wa, text="in which language do I apply?")
-    assert _button_ids(replies[0]) == ["skip"]  # advanced to the event step
-    assert conversation._SESSIONS[wa].step is conversation.Step.EVENT
+    assert "answer[English]" in replies[0].body  # answered, not treated as a command
+    assert "language" in fake_pipeline.retrieve_calls[-1]["query"]
 
 
 def test_keyword_as_the_very_first_message_still_reaches_the_question(fake_pipeline):
@@ -237,6 +266,81 @@ def test_keyword_as_the_very_first_message_still_reaches_the_question(fake_pipel
     assert replies[0].body == ArabicText.QUERY_PROMPT.value
     # The keyword is not mistaken for the start of a question.
     assert conversation._SESSIONS[wa].pending_query == ""
+
+
+# --------------------------------------------------------------------------- #
+# The fact-collecting flow, behind WHATSAPP_COLLECT_FACTS                      #
+# --------------------------------------------------------------------------- #
+
+
+@pytest.fixture
+def collect_facts(monkeypatch):
+    """Turn the retired pre-answer questions back on, as the env var does.
+
+    Patched on the module object rather than via the environment because
+    ``config`` reads its variables at import time.
+    """
+    monkeypatch.setattr(conversation.config, "COLLECT_FACTS", True)
+
+
+def test_flagged_flow_builds_facts_and_answers(fake_pipeline, collect_facts):
+    wa = "flagged"
+    conversation.reset(wa)
+    conversation.handle_message(wa, text="hi")
+
+    # Ask a question → event step with a Skip button, not an answer.
+    replies = conversation.handle_message(wa, text="What am I entitled to?")
+    assert _button_ids(replies[0]) == ["skip"]
+    assert fake_pipeline.retrieve_calls == []
+
+    # Type an event description → gender step (Female/Male/Skip).
+    replies = conversation.handle_message(wa, text="assault at home")
+    assert _button_ids(replies[0]) == ["gender:f", "gender:m", "skip"]
+
+    # Female → age step.
+    replies = conversation.handle_message(wa, button_id="gender:f")
+    assert _button_ids(replies[0]) == ["skip"]
+
+    # Age 30 → runs the pipeline.
+    replies = conversation.handle_message(wa, text="30")
+    assert "answer[English]" in replies[0].body
+
+    call = fake_pipeline.retrieve_calls[-1]
+    assert call["facts"] == {"gender": "f", "age": 30}
+    assert call["context"] == "assault at home"
+    assert call["query"] == "hi What am I entitled to?"
+
+
+def test_flagged_flow_all_skips_default_context_and_empty_facts(
+    fake_pipeline, collect_facts
+):
+    wa = "skips"
+    conversation.reset(wa)
+    conversation.handle_message(wa, text="שלום")
+    conversation.handle_message(wa, text="שאלה")
+    conversation.handle_message(wa, button_id="skip")  # event skipped
+    conversation.handle_message(wa, button_id="skip")  # gender skipped
+    conversation.handle_message(wa, button_id="skip")  # age skipped
+
+    call = fake_pipeline.retrieve_calls[-1]
+    assert call["facts"] is None  # empty facts → None (unconstrained retrieval)
+    assert call["context"] == "נפגע אירוע אלימות"  # DEFAULT_CONTEXT_ANCHOR
+
+
+def test_flagged_flow_invalid_age_reprompts_then_accepts(fake_pipeline, collect_facts):
+    wa = "age"
+    conversation.reset(wa)
+    conversation.handle_message(wa, text="hello")
+    conversation.handle_message(wa, text="q")
+    conversation.handle_message(wa, button_id="skip")  # event
+    conversation.handle_message(wa, button_id="skip")  # gender
+
+    replies = conversation.handle_message(wa, text="not-a-number")
+    assert "valid age" in replies[0].body.lower()
+    assert conversation._SESSIONS[wa].step is conversation.Step.AGE  # still on age
+
+    replies = conversation.handle_message(wa, text="42")
+    assert fake_pipeline.retrieve_calls[-1]["facts"] == {"age": 42}
 
 
 # --------------------------------------------------------------------------- #

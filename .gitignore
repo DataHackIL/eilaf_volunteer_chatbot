@@ -23,8 +23,11 @@ dist/
 *.egg-info/
 *.egg
 
-# Environment / secrets
+# Environment / secrets. The bare `.env` pattern matches that name ONLY —
+# a `.env.bak.<stamp>` from a token rotation would be untracked but NOT
+# ignored, i.e. one `git add -A` away from committing live credentials.
 .env
+.env.bak.*
 *.local
 
 # Logs
@@ -39,3 +42,5 @@ data/static/**/*.json
 # Cached corpus embeddings (regenerated on demand)
 data/static/**/.embeddings/
 
+# Local compose overrides (per-machine dev tweaks, never shared)
+docker-compose.override.yml

@@ -12,10 +12,12 @@ import hashlib
 import hmac
 import importlib
 
+import httpx
+
 import pytest
 from fastapi.testclient import TestClient
 
-from app.whatsapp import config, conversation, server
+from app.whatsapp import client, config, conversation, server
 from chatbot.rag.documents.documents import Document
 
 
@@ -266,3 +268,22 @@ def test_prod_imports_with_app_secret(reload_config):
 def test_dev_still_tolerates_a_missing_app_secret(reload_config):
     reloaded = reload_config(EILAF_ENV="", WHATSAPP_APP_SECRET="")
     assert reloaded.APP_SECRET == ""
+
+
+def test_send_failure_carries_the_graph_api_explanation(monkeypatch):
+    """A failed send must surface Meta's reason, not just the status line.
+
+    ``raise_for_status()`` reports "400 Bad Request" and discards the body, which
+    is where Meta actually says *why* — an expired token and a recipient missing
+    from the test allow-list look identical in the log without it.
+    """
+    body = '{"error":{"message":"(#131030) Recipient phone number not in allowed list"}}'
+    request = httpx.Request("POST", "https://graph.facebook.com/v21.0/1/messages")
+    monkeypatch.setattr(
+        client.httpx, "post", lambda *a, **k: httpx.Response(400, text=body, request=request)
+    )
+    monkeypatch.setattr(client.config, "ACCESS_TOKEN", "t0ken")
+    monkeypatch.setattr(client.config, "PHONE_NUMBER_ID", "1")
+
+    with pytest.raises(httpx.HTTPStatusError, match="131030"):
+        client.send_text("972500000000", "hi")

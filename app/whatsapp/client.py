@@ -27,7 +27,16 @@ def _post(payload: dict) -> None:
         json=payload,
         timeout=_TIMEOUT,
     )
-    resp.raise_for_status()
+    if resp.is_error:
+        # Meta says *why* in the body — an expired token, a malformed payload,
+        # or (#131030) a recipient missing from the test allow-list. Plain
+        # ``raise_for_status()`` drops it and logs a bare "400 Bad Request",
+        # which is indistinguishable from every other way a send can fail.
+        raise httpx.HTTPStatusError(
+            f"{resp.status_code} from {resp.request.url}: {resp.text}",
+            request=resp.request,
+            response=resp,
+        )
 
 
 def send_text(to: str, body: str) -> None:

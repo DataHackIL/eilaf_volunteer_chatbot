@@ -158,11 +158,28 @@ if command -v apt-get >/dev/null; then
     sudo apt-get install -y -qq docker.io docker-compose-v2 rsync
 else
     sudo dnf install -y -q docker rsync
-    # Amazon Linux has no compose v2 package; install the CLI plugin by hand.
+    # Amazon Linux ships neither compose v2 nor buildx as packages, and compose
+    # refuses to build without buildx ("requires buildx 0.17.0 or later"), so
+    # both CLI plugins are installed by hand.
     mkdir -p ~/.docker/cli-plugins
     curl -sSL "https://github.com/docker/compose/releases/latest/download/docker-compose-linux-$(uname -m)" \
         -o ~/.docker/cli-plugins/docker-compose
     chmod +x ~/.docker/cli-plugins/docker-compose
+
+    # buildx release assets carry the version in the filename, so /latest/download
+    # can't be used directly — ask the API, and fall back to a pin if that fails
+    # (rate limit, no network to api.github.com).
+    case "$(uname -m)" in
+        x86_64)  arch=amd64 ;;
+        aarch64) arch=arm64 ;;
+        *)       arch="$(uname -m)" ;;
+    esac
+    bx=$(curl -sSL https://api.github.com/repos/docker/buildx/releases/latest \
+         | grep -o "\"browser_download_url\": *\"[^\"]*linux-${arch}\"" \
+         | head -1 | cut -d'"' -f4)
+    [ -n "$bx" ] || bx="https://github.com/docker/buildx/releases/download/v0.17.1/buildx-v0.17.1.linux-${arch}"
+    curl -sSL "$bx" -o ~/.docker/cli-plugins/docker-buildx
+    chmod +x ~/.docker/cli-plugins/docker-buildx
 fi
 sudo systemctl enable --now docker
 sudo usermod -aG docker "$USER"
@@ -170,11 +187,15 @@ sudo usermod -aG docker "$USER"
 # Swap is margin, not a substitute for RAM: the e5-large weights alone are
 # ~2.1 GB resident, so this only covers build spikes on a 4 GB instance.
 if ! swapon --show | grep -q .; then
+    # No -q on mkswap: util-linux on Amazon Linux 2023 doesn't have it, and with
+    # `set -e` the unknown flag aborts the whole bootstrap.
+    sudo rm -f /swapfile                       # re-runnable after a failed attempt
     sudo fallocate -l 2G /swapfile
     sudo chmod 600 /swapfile
-    sudo mkswap -q /swapfile
+    sudo mkswap /swapfile >/dev/null
     sudo swapon /swapfile
-    echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab >/dev/null
+    grep -q '^/swapfile ' /etc/fstab \
+        || echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab >/dev/null
 fi
 BOOTSTRAP_EOF
     echo "deploy:   bootstrap done (docker group membership needs a new session —"
@@ -201,6 +222,12 @@ RSYNC_EXCLUDES=(
     --exclude '.agents/'
     --exclude '.idea/'
     --exclude '.vscode/'
+    # Per-machine compose tweaks. .gitignore keeps these out of git, which says
+    # nothing to rsync — and shipping one is actively harmful: the dev override
+    # mounts a local HF cache and sets HF_HUB_OFFLINE=1, which on a remote host
+    # means an empty cache the container is forbidden to populate, so it
+    # crash-loops on a model it could have downloaded in a minute.
+    --exclude 'docker-compose.override.yml'
 )
 
 RSH="ssh ${SSH_OPTS[*]}"
@@ -224,6 +251,10 @@ if [ "$SKIP_CORPUS" -eq 0 ]; then
 fi
 
 remote "chmod 600 ~/$REMOTE_DIR/.env"
+# Excluding the override above stops us *sending* one, but rsync also protects
+# excluded paths from --delete, so a copy shipped by an earlier version of this
+# script would linger forever. A remote host must never have one.
+remote "rm -f ~/$REMOTE_DIR/app/whatsapp/docker-compose.override.yml"
 
 # --- 4. build + launch -----------------------------------------------------
 # EILAF_ENV=prod: an internet-reachable host must validate the App-Secret HMAC,

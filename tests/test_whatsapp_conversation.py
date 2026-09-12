@@ -17,6 +17,7 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 
+from app.visualizer.i18n import TEXTS, ArabicText, HebrewText, Language
 from app.whatsapp import client, config, conversation, server
 from chatbot.rag.documents.documents import Document
 
@@ -62,13 +63,11 @@ def test_happy_path_builds_facts_and_answers(fake_pipeline):
     wa = "happy"
     conversation.reset(wa)
 
-    # First contact → language menu with the three language buttons.
+    # First contact → language detected from the greeting (no menu turn), and
+    # the welcome offers the other two languages in case the guess was wrong.
     replies = conversation.handle_message(wa, text="hi")
-    assert _button_ids(replies[0]) == ["lang:he", "lang:ar", "lang:en"]
-
-    # Pick English → question prompt (English string).
-    replies = conversation.handle_message(wa, button_id="lang:en")
-    assert replies[0].body == "What would you like to ask?"
+    assert _button_ids(replies[0]) == ["lang:he", "lang:ar"]
+    assert "What would you like to ask?" in replies[0].body
 
     # Ask a question → event step with a Skip button.
     replies = conversation.handle_message(wa, text="What am I entitled to?")
@@ -91,6 +90,8 @@ def test_happy_path_builds_facts_and_answers(fake_pipeline):
     call = fake_pipeline.retrieve_calls[-1]
     assert call["facts"] == {"gender": "f", "age": 30}
     assert call["context"] == "assault at home"
+    # The opening message is kept, prepended to the question.
+    assert call["query"] == "hi What am I entitled to?"
     # Language threaded into the generator as its English name.
     assert fake_pipeline.generator.last[2] == "English"
 
@@ -101,7 +102,7 @@ def test_happy_path_builds_facts_and_answers(fake_pipeline):
 def test_all_skips_default_context_and_empty_facts(fake_pipeline):
     wa = "skips"
     conversation.reset(wa)
-    conversation.handle_message(wa, button_id="lang:he")
+    conversation.handle_message(wa, text="שלום")
     conversation.handle_message(wa, text="שאלה")
     conversation.handle_message(wa, button_id="skip")  # event skipped
     conversation.handle_message(wa, button_id="skip")  # gender skipped
@@ -115,7 +116,7 @@ def test_all_skips_default_context_and_empty_facts(fake_pipeline):
 def test_invalid_age_reprompts_then_accepts(fake_pipeline):
     wa = "age"
     conversation.reset(wa)
-    conversation.handle_message(wa, button_id="lang:en")
+    conversation.handle_message(wa, text="hello")
     conversation.handle_message(wa, text="q")
     conversation.handle_message(wa, button_id="skip")  # event
     conversation.handle_message(wa, button_id="skip")  # gender
@@ -131,10 +132,111 @@ def test_invalid_age_reprompts_then_accepts(fake_pipeline):
 def test_empty_question_reprompts(fake_pipeline):
     wa = "empty"
     conversation.reset(wa)
-    conversation.handle_message(wa, button_id="lang:en")
+    conversation.handle_message(wa, text="hello")
     replies = conversation.handle_message(wa, text="   ")
     assert replies[0].body == "What would you like to ask?"
     assert conversation._SESSIONS[wa].step is conversation.Step.QUERY
+    # A bare greeting must never become the query on its own, so it is held.
+    assert conversation._SESSIONS[wa].pending_query == "hello"
+
+
+# --------------------------------------------------------------------------- #
+# Language: detection, correction, and where it lands                          #
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.parametrize(
+    ("greeting", "language"),
+    [
+        ("שלום", Language.HEBREW),
+        ("مرحبا", Language.ARABIC),
+        ("hi there", Language.ENGLISH),
+        ("👋", Language.HEBREW),  # no script signal → default
+        ("2", Language.HEBREW),
+    ],
+)
+def test_first_message_sets_the_language(fake_pipeline, greeting, language):
+    wa = f"detect-{language.value}-{greeting}"
+    conversation.reset(wa)
+    replies = conversation.handle_message(wa, text=greeting)
+
+    assert conversation._SESSIONS[wa].language is language
+    assert TEXTS[language].QUERY_PROMPT.value in replies[0].body
+    # The switch buttons offer the two languages we did *not* pick.
+    assert _button_ids(replies[0]) == [
+        f"lang:{lang.value}" for lang in Language if lang is not language
+    ]
+
+
+def test_a_second_question_is_not_polluted_by_the_greeting(fake_pipeline):
+    wa = "second"
+    conversation.reset(wa)
+    conversation.handle_message(wa, text="hi")
+    conversation.handle_message(wa, text="what am I entitled to?")
+    for _ in range(3):  # event, gender, age
+        conversation.handle_message(wa, button_id="skip")
+    assert fake_pipeline.retrieve_calls[-1]["query"] == "hi what am I entitled to?"
+
+    # Back at the question step; the opening message was consumed, not kept.
+    conversation.handle_message(wa, text="and who is eligible?")
+    for _ in range(3):
+        conversation.handle_message(wa, button_id="skip")
+    assert fake_pipeline.retrieve_calls[-1]["query"] == "and who is eligible?"
+
+
+def test_language_button_switches_without_losing_the_step(fake_pipeline):
+    wa = "switch"
+    conversation.reset(wa)
+    conversation.handle_message(wa, text="hello")
+    conversation.handle_message(wa, text="a question")  # now on the event step
+
+    replies = conversation.handle_message(wa, button_id="lang:he")
+    assert conversation._SESSIONS[wa].language is Language.HEBREW
+    # Same step, re-asked in Hebrew — progress is kept, not restarted.
+    assert conversation._SESSIONS[wa].step is conversation.Step.EVENT
+    assert replies[0].body == HebrewText.CONTEXT_PROMPT.value
+    assert _button_ids(replies[0]) == ["skip"]
+
+    conversation.handle_message(wa, button_id="skip")  # event
+    conversation.handle_message(wa, button_id="skip")  # gender
+    conversation.handle_message(wa, button_id="skip")  # age
+    # The switch reached the generator: Hebrew, though the question was English.
+    assert fake_pipeline.generator.last[2] == "Hebrew"
+
+
+def test_language_keyword_reopens_the_full_menu_mid_flow(fake_pipeline):
+    wa = "keyword"
+    conversation.reset(wa)
+    conversation.handle_message(wa, text="hello")
+    conversation.handle_message(wa, text="a question")  # event step
+
+    replies = conversation.handle_message(wa, text="language")
+    assert replies[0].body == conversation.LANGUAGE_PROMPT
+    assert _button_ids(replies[0]) == ["lang:he", "lang:ar", "lang:en"]
+    # The menu itself does not advance or reset the flow.
+    assert conversation._SESSIONS[wa].step is conversation.Step.EVENT
+
+
+def test_a_question_mentioning_language_is_not_taken_as_the_keyword(fake_pipeline):
+    wa = "not-keyword"
+    conversation.reset(wa)
+    conversation.handle_message(wa, text="hi")
+    replies = conversation.handle_message(wa, text="in which language do I apply?")
+    assert _button_ids(replies[0]) == ["skip"]  # advanced to the event step
+    assert conversation._SESSIONS[wa].step is conversation.Step.EVENT
+
+
+def test_keyword_as_the_very_first_message_still_reaches_the_question(fake_pipeline):
+    wa = "keyword-first"
+    conversation.reset(wa)
+    replies = conversation.handle_message(wa, text="שפה")
+    assert _button_ids(replies[0]) == ["lang:he", "lang:ar", "lang:en"]
+
+    replies = conversation.handle_message(wa, button_id="lang:ar")
+    assert conversation._SESSIONS[wa].step is conversation.Step.QUERY
+    assert replies[0].body == ArabicText.QUERY_PROMPT.value
+    # The keyword is not mistaken for the start of a question.
+    assert conversation._SESSIONS[wa].pending_query == ""
 
 
 # --------------------------------------------------------------------------- #
@@ -196,6 +298,7 @@ def test_webhook_verification_rejects_bad_token(webhook_client):
 
 def test_webhook_dispatches_inbound_text(webhook_client):
     client, sent = webhook_client
+    conversation.reset("972500000000")
     payload = {
         "object": "whatsapp_business_account",
         "entry": [
@@ -215,9 +318,10 @@ def test_webhook_dispatches_inbound_text(webhook_client):
     }
     resp = client.post("/webhook", json=payload)
     assert resp.status_code == 200
-    # Background task ran: first contact → language menu sent to the sender.
+    # Background task ran: first contact → welcome sent to the sender, in the
+    # language detected from "hi", with the two switch buttons.
     assert sent and sent[0][0] == "972500000000"
-    assert _button_ids(sent[0][1]) == ["lang:he", "lang:ar", "lang:en"]
+    assert _button_ids(sent[0][1]) == ["lang:he", "lang:ar"]
 
 
 def test_webhook_ignores_status_callbacks(webhook_client):

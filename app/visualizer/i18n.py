@@ -70,6 +70,8 @@ class HebrewText(Enum):
     SKIP = "דלג"
     ASK_ANOTHER = "אפשר לשאול שאלה נוספת 🙂"
     INVALID_AGE = "נא להזין גיל תקין (מספר), או ללחוץ על דילוג."
+    WELCOME = "שלום! 👋 אני הצ'אטבוט של אילאף, ואפשר לשאול אותי על זכויות וסיוע לנפגעי אירועי אלימות."
+    CHANGE_LANGUAGE = "לשינוי שפה: לחצו על אחד הכפתורים, או כתבו \"שפה\" בכל שלב."
 
 
 class ArabicText(Enum):
@@ -103,6 +105,8 @@ class ArabicText(Enum):
     SKIP = "تخطّي"
     ASK_ANOTHER = "فيكم تسألوا سؤال تاني 🙂"
     INVALID_AGE = "لطفاً دخّلوا عمر صحيح (رقم)، أو اضغطوا تخطّي."
+    WELCOME = "مرحبا! 👋 أنا الشات بوت تبع إيلاف، وفيكم تسألوني عن الحقوق والمساعدة لمتضرري حوادث العنف."
+    CHANGE_LANGUAGE = "لتغيير اللغة: اضغطوا على أحد الأزرار، أو اكتبوا \"لغة\" بأي وقت."
 
 
 class EnglishText(Enum):
@@ -135,6 +139,8 @@ class EnglishText(Enum):
     SKIP = "Skip"
     ASK_ANOTHER = "You can ask another question 🙂"
     INVALID_AGE = "Please enter a valid age (a number), or tap Skip."
+    WELCOME = "Hi! 👋 I'm the Eilaf chatbot — ask me about the rights of, and support for, victims of violent events."
+    CHANGE_LANGUAGE = "To change language: tap one of the buttons, or type \"language\" at any point."
 
 
 TEXTS: dict[Language, type[Enum]] = {

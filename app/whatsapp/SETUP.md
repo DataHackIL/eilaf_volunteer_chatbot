@@ -3,7 +3,13 @@
 This is the WhatsApp front-end for the Eilaf RAG pipeline. It runs a webhook
 server that mirrors the Streamlit app as a multi-turn WhatsApp chat:
 
-> language → question → violent-event description → gender → age → answer
+> question (language auto-detected) → violent-event description → gender → age → answer
+
+The language is guessed from the script of the user's first message (Hebrew,
+Arabic, or English; Hebrew when there is no signal), so there is no language menu
+to get through — the opening message is kept and prepended to the question. A
+wrong guess is corrected with the two buttons on the welcome message, or by
+typing `שפה` / `لغة` / `language` at any point.
 
 This guide takes you from a Meta developer account to a working bot on your own
 machine, exposed to Meta through a tunnel. No paid hosting required.

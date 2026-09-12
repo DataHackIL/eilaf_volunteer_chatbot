@@ -4,11 +4,20 @@ WhatsApp has no equivalent of Streamlit's ``st.session_state``, so we keep our
 own per-user state (keyed by the sender's WhatsApp id, ``wa_id``) and serialize
 the Streamlit app's one-page inputs into a multi-turn dialog:
 
-    language → question → violent-event description → gender → age → answer
+    question (language auto-detected) → violent-event description → gender → age → answer
+
+Language is **not** a step. Asking "which language?" costs a whole turn before
+the user can say anything useful, and their opening message already answers it —
+its script identifies he/ar/en (see :mod:`app.language`). So the first message is
+used twice: as the language sample, and as the start of the question, which it is
+prepended to so nothing the user typed is thrown away. When detection has no
+signal we fall back to :data:`DEFAULT_LANGUAGE`; a wrong guess (Arabic typed in
+Latin letters is the realistic case) is corrected with the reply buttons on the
+opening message, or by typing "language" at any point.
 
 Each optional step offers a **Skip** button; the collected answers become the
 same ``facts`` dict the Streamlit app builds (``streamlit_app.py`` ~L146), then
-we call the shared pipeline and reply in the user's chosen language.
+we call the shared pipeline and reply in the user's language.
 
 State is in-memory (``_SESSIONS``); it is per-process and resets on restart,
 which is fine for the single-process interim deployment. Swapping it for SQLite
@@ -22,6 +31,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from enum import Enum, auto
 
+from app.language import detect_language
 from app.visualizer.i18n import TEXTS, Language
 from app.whatsapp.pipeline_singleton import get_pipeline
 from chatbot.rag.pipeline.pipeline import DEFAULT_CONTEXT_ANCHOR
@@ -31,12 +41,35 @@ _SKIP = "skip"
 _LANG_PREFIX = "lang:"
 _GENDER_PREFIX = "gender:"
 
-# Shown before a language is known, so it is deliberately trilingual.
+# Used when the opening message carries no script signal (digits, emoji, or a
+# non-text message such as a voice note).
+DEFAULT_LANGUAGE = Language.HEBREW
+
+# Shown when the user asks for the menu explicitly, so it stays trilingual —
+# whatever language we guessed may be the one they cannot read.
 LANGUAGE_PROMPT = "בחרו שפה · اختاروا اللغة · Choose a language"
+
+# Typing one of these re-opens the language menu, at any step. Matched exactly
+# (after strip/lower) so a real question mentioning "language" is never eaten.
+_LANGUAGE_KEYWORDS = frozenset(
+    {
+        "שפה",
+        "שינוי שפה",
+        "החלפת שפה",
+        "לשנות שפה",
+        "لغة",
+        "اللغة",
+        "تغيير اللغة",
+        "language",
+        "change language",
+        "lang",
+        "/lang",
+    }
+)
 
 
 class Step(Enum):
-    LANGUAGE = auto()
+    WELCOME = auto()
     QUERY = auto()
     EVENT = auto()
     GENDER = auto()
@@ -45,8 +78,10 @@ class Step(Enum):
 
 @dataclass
 class Session:
-    step: Step = Step.LANGUAGE
-    language: Language | None = None
+    step: Step = Step.WELCOME
+    language: Language = DEFAULT_LANGUAGE
+    # The opening message, held until the question arrives and prepended to it.
+    pending_query: str = ""
     query: str = ""
     context: str = DEFAULT_CONTEXT_ANCHOR
     facts: dict = field(default_factory=dict)
@@ -80,8 +115,17 @@ def handle_message(
     """
     session = _SESSIONS.setdefault(wa_id, Session())
 
-    if session.step is Step.LANGUAGE:
-        return _handle_language(session, button_id)
+    # Language changes are handled ahead of the step dispatch: a WhatsApp button
+    # stays tappable in the chat history, so ``lang:`` can arrive many turns
+    # after the message that offered it, and the keyword deliberately works
+    # anywhere. Neither loses the user's place in the flow.
+    if button_id and button_id.startswith(_LANG_PREFIX):
+        return _switch_language(session, button_id[len(_LANG_PREFIX) :])
+    if text and text.strip().lower() in _LANGUAGE_KEYWORDS:
+        return [Reply(LANGUAGE_PROMPT, buttons=_language_buttons())]
+
+    if session.step is Step.WELCOME:
+        return _handle_welcome(session, text)
     if session.step is Step.QUERY:
         return _handle_query(session, text)
     if session.step is Step.EVENT:
@@ -93,49 +137,75 @@ def handle_message(
     raise AssertionError(f"unhandled step {session.step}")  # pragma: no cover
 
 
-def _handle_language(session: Session, button_id: str | None) -> list[Reply]:
-    if button_id and button_id.startswith(_LANG_PREFIX):
-        session.language = Language(button_id[len(_LANG_PREFIX) :])
+def _handle_welcome(session: Session, text: str | None) -> list[Reply]:
+    """First contact: guess the language, keep the message, ask the question."""
+    session.language = detect_language(text) or DEFAULT_LANGUAGE
+    session.pending_query = (text or "").strip()
+    session.step = Step.QUERY
+
+    t = TEXTS[session.language]
+    body = "\n\n".join(
+        (t.WELCOME.value, t.QUERY_PROMPT.value, t.CHANGE_LANGUAGE.value)
+    )
+    return [Reply(body, buttons=_switch_buttons(session.language))]
+
+
+def _switch_language(session: Session, code: str) -> list[Reply]:
+    """Adopt the tapped language and re-ask the current step in it."""
+    try:
+        session.language = Language(code)
+    except ValueError:  # pragma: no cover — ids are ours, but never trust input
+        return _reprompt(session)
+    if session.step is Step.WELCOME:
+        # Reached only when the very first message was the keyword itself, so
+        # there is no question to collect yet — just move on to asking for one.
         session.step = Step.QUERY
-        return [Reply(TEXTS[session.language].QUERY_PROMPT.value)]
-    # First contact or anything that isn't a language pick → (re)offer the menu.
+    return _reprompt(session)
+
+
+def _language_buttons() -> list[tuple[str, str]]:
+    """All three languages, for the explicitly-requested menu."""
+    return [(f"{_LANG_PREFIX}{lang.value}", lang.native_name) for lang in Language]
+
+
+def _switch_buttons(current: Language) -> list[tuple[str, str]]:
+    """The two languages the user is *not* in, to correct a wrong guess."""
     return [
-        Reply(
-            LANGUAGE_PROMPT,
-            buttons=[(f"{_LANG_PREFIX}{lang.value}", lang.native_name) for lang in Language],
-        )
+        (f"{_LANG_PREFIX}{lang.value}", lang.native_name)
+        for lang in Language
+        if lang is not current
     ]
 
 
 def _handle_query(session: Session, text: str | None) -> list[Reply]:
-    t = TEXTS[session.language]
-    if not text or not text.strip():
-        return [Reply(t.QUERY_PROMPT.value)]
-    session.query = text.strip()
+    new_text = (text or "").strip()
+    if not new_text:
+        # Keep ``pending_query``: on its own, an opening "hi" is not a question.
+        return _reprompt(session)
+    session.query = " ".join(p for p in (session.pending_query, new_text) if p)
+    session.pending_query = ""  # consumed; later questions stand alone
     session.step = Step.EVENT
-    return [Reply(t.CONTEXT_PROMPT.value, buttons=[(_SKIP, t.SKIP.value)])]
+    return _reprompt(session)
 
 
 def _handle_event(
     session: Session, text: str | None, button_id: str | None
 ) -> list[Reply]:
-    t = TEXTS[session.language]
     # Skip keeps the default domain anchor; typed text overrides it.
     if button_id != _SKIP and text and text.strip():
         session.context = text.strip()
     session.step = Step.GENDER
-    return [_gender_prompt(t)]
+    return _reprompt(session)
 
 
 def _handle_gender(session: Session, button_id: str | None) -> list[Reply]:
-    t = TEXTS[session.language]
     if button_id and button_id.startswith(_GENDER_PREFIX):
         session.facts["gender"] = button_id[len(_GENDER_PREFIX) :]  # "f" / "m"
     elif button_id != _SKIP:
         # Typed text instead of tapping a button → re-offer the choices.
-        return [_gender_prompt(t)]
+        return _reprompt(session)
     session.step = Step.AGE
-    return [Reply(t.AGE.value, buttons=[(_SKIP, t.SKIP.value)])]
+    return _reprompt(session)
 
 
 def _handle_age(
@@ -150,15 +220,29 @@ def _handle_age(
     return _run_pipeline(session)
 
 
-def _gender_prompt(t) -> Reply:
-    return Reply(
-        t.GENDER.value,
-        buttons=[
-            (f"{_GENDER_PREFIX}f", t.GENDER_FEMALE.value),
-            (f"{_GENDER_PREFIX}m", t.GENDER_MALE.value),
-            (_SKIP, t.SKIP.value),
-        ],
-    )
+def _reprompt(session: Session) -> list[Reply]:
+    """The prompt for the step we are now on, in the session's language.
+
+    One place per step, so advancing a step and re-asking it after a language
+    switch cannot drift apart.
+    """
+    t = TEXTS[session.language]
+    if session.step is Step.EVENT:
+        return [Reply(t.CONTEXT_PROMPT.value, buttons=[(_SKIP, t.SKIP.value)])]
+    if session.step is Step.GENDER:
+        return [
+            Reply(
+                t.GENDER.value,
+                buttons=[
+                    (f"{_GENDER_PREFIX}f", t.GENDER_FEMALE.value),
+                    (f"{_GENDER_PREFIX}m", t.GENDER_MALE.value),
+                    (_SKIP, t.SKIP.value),
+                ],
+            )
+        ]
+    if session.step is Step.AGE:
+        return [Reply(t.AGE.value, buttons=[(_SKIP, t.SKIP.value)])]
+    return [Reply(t.QUERY_PROMPT.value)]  # Step.QUERY
 
 
 def _run_pipeline(session: Session) -> list[Reply]:

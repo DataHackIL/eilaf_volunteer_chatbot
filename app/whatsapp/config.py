@@ -26,6 +26,10 @@ ACCESS_TOKEN = os.environ.get("WHATSAPP_ACCESS_TOKEN", "")
 PHONE_NUMBER_ID = os.environ.get("WHATSAPP_PHONE_NUMBER_ID", "")
 VERIFY_TOKEN = os.environ.get("WHATSAPP_VERIFY_TOKEN", "")
 APP_SECRET = os.environ.get("WHATSAPP_APP_SECRET", "")
+# Optional. Only used to build the app access token (``<id>|<secret>``) that
+# ``debug_token`` needs to report *when* the access token expires. Without it
+# the boot check can still tell whether the token works, just not for how long.
+APP_ID = os.environ.get("WHATSAPP_APP_ID", "")
 
 # Marks a deployment that is reachable from the internet. Only tightens the
 # checks below — unset (the default) keeps local/offline runs permissive.

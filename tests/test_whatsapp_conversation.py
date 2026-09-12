@@ -142,6 +142,22 @@ def test_empty_question_reprompts(fake_pipeline):
 # --------------------------------------------------------------------------- #
 
 
+@pytest.fixture(autouse=True)
+def _no_token_probe(monkeypatch):
+    """Keep the boot-time token check off the network in every test.
+
+    ``server.lifespan`` probes the Graph API, so without this any test that
+    starts the app would make a real call — slow, flaky, and dependent on a
+    live credential. ``usable=None`` is the "couldn't tell" verdict, which the
+    check treats as non-fatal.
+    """
+    monkeypatch.setattr(
+        server.client,
+        "check_token",
+        lambda: client.TokenStatus(None, None, "stubbed in tests"),
+    )
+
+
 @pytest.fixture
 def webhook_client(monkeypatch):
     # Avoid loading the real e5 pipeline at lifespan startup.
@@ -287,3 +303,35 @@ def test_send_failure_carries_the_graph_api_explanation(monkeypatch):
 
     with pytest.raises(httpx.HTTPStatusError, match="131030"):
         client.send_text("972500000000", "hi")
+
+
+def test_prod_refuses_to_serve_on_a_rejected_token(monkeypatch):
+    """A token Meta rejects must stop the boot, not degrade to a mute bot."""
+    monkeypatch.setattr(server, "get_pipeline", lambda: None)
+    monkeypatch.setattr(server.config, "ENV", "prod")
+    monkeypatch.setattr(
+        server.client,
+        "check_token",
+        lambda: client.TokenStatus(False, None, "190: Session has expired"),
+    )
+    with pytest.raises(RuntimeError, match="rejected by Meta"):
+        with TestClient(server.app):
+            pass
+
+
+def test_dev_serves_on_a_rejected_token(monkeypatch):
+    """Outside prod the same token only warns — offline work stays possible."""
+    monkeypatch.setattr(server, "get_pipeline", lambda: None)
+    monkeypatch.setattr(server.config, "ENV", "")
+    monkeypatch.setattr(
+        server.client,
+        "check_token",
+        lambda: client.TokenStatus(False, None, "190: Session has expired"),
+    )
+    with TestClient(server.app) as c:
+        assert c.get("/webhook").status_code == 403  # up and serving
+
+
+def test_seconds_left_is_none_when_the_token_never_expires():
+    assert client.TokenStatus(True, 0, "ok").seconds_left is None
+    assert client.TokenStatus(True, None, "ok").seconds_left is None

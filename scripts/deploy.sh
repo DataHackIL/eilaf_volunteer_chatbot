@@ -26,6 +26,7 @@ REMOTE_DIR="eilaf_volunteer_chatbot"
 BOOTSTRAP=0
 BUILD="--build"
 SKIP_CORPUS=0
+CHECK_TOKEN=1
 
 usage() {
     # The header block above, minus the shebang and the `set -e` line — so
@@ -40,6 +41,7 @@ Options:
       --bootstrap    install docker/compose/git/rsync first (fresh host, once)
       --no-build     restart without rebuilding the image (config-only changes)
       --skip-corpus  don't sync data/static (it is ~47 MB and rarely changes)
+      --no-token-check  skip the live Graph API probe (offline deploys)
   -h, --help         this message
 USAGE
     exit "${1:-0}"
@@ -55,6 +57,7 @@ while [ $# -gt 0 ]; do
         --bootstrap)   BOOTSTRAP=1; shift ;;
         --no-build)    BUILD=""; shift ;;
         --skip-corpus) SKIP_CORPUS=1; shift ;;
+        --no-token-check) CHECK_TOKEN=0; shift ;;
         -h|--help)     usage 0 ;;
         -*)            die "unknown option $1 (try --help)" ;;
         *)             [ -n "${HOST:-}" ] && die "more than one host given"
@@ -86,6 +89,46 @@ for key in WHATSAPP_ACCESS_TOKEN WHATSAPP_PHONE_NUMBER_ID WHATSAPP_VERIFY_TOKEN 
 done
 # EILAF_ENV=prod (set at launch below) makes the App Secret mandatory at import;
 # catching it here beats watching the container crash-loop on the far end.
+
+# A *present* token is not a working one, and a dead one fails silently: Meta
+# keeps delivering webhooks and still reports a healthy callback URL while every
+# reply fails. Ask Meta before shipping the credential, not after.
+if [ "$CHECK_TOKEN" -eq 1 ]; then
+    (
+        set -a; . ./.env; set +a
+        base="https://graph.facebook.com/${GRAPH_API_VERSION:-v21.0}"
+        body=$(curl -s --max-time 20 "$base/$WHATSAPP_PHONE_NUMBER_ID" \
+                    -H "Authorization: Bearer $WHATSAPP_ACCESS_TOKEN") || {
+            echo "deploy: WARNING — could not reach the Graph API; token unverified" >&2
+            exit 0
+        }
+        if ! printf '%s' "$body" | grep -q '"id"'; then
+            echo "deploy: WHATSAPP_ACCESS_TOKEN was rejected by Meta:" >&2
+            printf '%s\n' "$body" | head -c 400 >&2; echo >&2
+            echo "deploy: refusing to deploy a token that cannot send." >&2
+            exit 1
+        fi
+        # Expiry needs an app access token, so it is best-effort: no
+        # WHATSAPP_APP_ID means we still know the token works, just not for
+        # how long.
+        if [ -n "${WHATSAPP_APP_ID:-}" ]; then
+            exp=$(curl -s --max-time 20 "$base/debug_token" \
+                       --get --data-urlencode "input_token=$WHATSAPP_ACCESS_TOKEN" \
+                       --data-urlencode "access_token=$WHATSAPP_APP_ID|$WHATSAPP_APP_SECRET" \
+                  | python3 -c "import json,sys; print(json.load(sys.stdin).get('data',{}).get('expires_at',''))" 2>/dev/null)
+            if [ -n "$exp" ] && [ "$exp" != "0" ]; then
+                days=$(( (exp - $(date +%s)) / 86400 ))
+                if [ "$days" -lt 14 ]; then
+                    echo "deploy: WARNING — access token expires in $days days; rotate before it does" >&2
+                else
+                    echo "deploy:   token ok (expires in $days days)"
+                fi
+            fi
+        else
+            echo "deploy:   token ok (set WHATSAPP_APP_ID in .env to see its expiry)"
+        fi
+    ) || exit 1
+fi
 
 if [ "$SKIP_CORPUS" -eq 0 ]; then
     [ -d data/static/enriched ] || die "data/static/enriched/ is missing — nothing to answer from"

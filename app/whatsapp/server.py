@@ -32,8 +32,49 @@ from app.whatsapp.pipeline_singleton import get_pipeline
 logger = logging.getLogger("whatsapp")
 
 
+# Warn this far ahead of the access token's expiry. The dashboard's tokens last
+# 24h and an exchanged one 60 days, so a week is enough notice to rotate without
+# crying wolf on every boot.
+_TOKEN_WARN_SECONDS = 7 * 24 * 3600
+
+
+def _check_access_token() -> None:
+    """Report the access token's health at boot; refuse to serve on a dead one.
+
+    An expired token fails *asymmetrically*: Meta keeps delivering webhooks and
+    still shows a healthy callback URL, so the bot receives everything and
+    answers nothing. That is invisible without watching the logs, which nobody
+    does on an unattended host — hence a check at the one moment someone is
+    likely to be looking, and a hard stop under EILAF_ENV=prod.
+    """
+    status = client.check_token()
+    if status.usable is None:
+        # Unknown, not broken — a Graph API blip must not keep the bot down.
+        logger.warning("access token not verified: %s", status.detail)
+        return
+    if not status.usable:
+        message = f"WHATSAPP_ACCESS_TOKEN was rejected by Meta — {status.detail}"
+        if config.ENV == "prod":
+            raise RuntimeError(message + " (refusing to start: replies would fail)")
+        logger.error("%s — replies WILL fail", message)
+        return
+
+    left = status.seconds_left
+    if left is None:
+        logger.info("access token ok (expiry unknown; set WHATSAPP_APP_ID to see it)")
+    elif left <= 0:
+        logger.error("access token expired %d days ago", -left // 86400)
+    elif left < _TOKEN_WARN_SECONDS:
+        logger.warning("access token expires in %d days — rotate it", left // 86400)
+    else:
+        logger.info("access token ok, expires in %d days", left // 86400)
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
+    # Before the slow model load, so a dead credential is reported in seconds
+    # rather than after a minute of warming a pipeline that cannot reply.
+    await run_in_threadpool(_check_access_token)
     # Load the e5 model + embedding cache once at boot (in a thread so the event
     # loop isn't blocked), not lazily on the first user's message.
     await run_in_threadpool(get_pipeline)

@@ -38,6 +38,13 @@ You need four values, all injected via the repo-root `.env` (never committed):
 | `WHATSAPP_PHONE_NUMBER_ID`   | The sending phone number's id               |
 | `WHATSAPP_VERIFY_TOKEN`      | A string **you invent** (webhook handshake) |
 | `WHATSAPP_APP_SECRET`        | App Secret (validates incoming webhooks)    |
+| `WHATSAPP_APP_ID`            | App ID — *optional*, see below              |
+
+`WHATSAPP_APP_ID` is not a secret and nothing needs it to run. Set it and the
+boot-time check and `scripts/deploy.sh` can report **how long the access token
+has left** (it is the `<id>|<secret>` app access token that Meta's `debug_token`
+requires); leave it unset and they can still tell you whether the token works,
+just not for how long.
 
 ### 1.1 Create the app
 1. Go to <https://developers.facebook.com> → **My Apps** → **Create App**.
@@ -166,6 +173,35 @@ Leave it unset locally — nothing changes and the offline flow keeps working.
 > `config.py` reads the environment once at import, and `docker compose restart`
 > reuses the old container's environment. Use
 > `docker compose up -d --force-recreate chatbot`.
+
+### When the access token dies (it fails silently)
+
+An expired or under-scoped access token is the nastiest failure mode here,
+because nothing looks broken: Meta keeps delivering webhooks, the dashboard
+still shows a healthy callback URL, the container stays up — and every reply
+fails. You find out from a user, not a log.
+
+Two checks make it loud:
+
+- **At boot** — `server.py` probes the token before loading the model. It logs
+  the days remaining, warns under a week, and under `EILAF_ENV=prod` *refuses to
+  start* on a token Meta rejects. A network failure counts as "unknown", not
+  "dead": a Graph API blip must not keep the bot down.
+- **At deploy** — `scripts/deploy.sh` pre-flights the same probe and refuses to
+  ship a token that cannot send. `--no-token-check` skips it for offline work.
+
+The dashboard only ever issues 24-hour tokens. Exchange one for 60 days:
+
+```bash
+source .env
+curl -s "https://graph.facebook.com/v21.0/oauth/access_token?grant_type=fb_exchange_token&client_id=$WHATSAPP_APP_ID&client_secret=$WHATSAPP_APP_SECRET&fb_exchange_token=<24H_TOKEN>"
+```
+
+> **Regenerate the token after changing app↔WABA wiring.** Meta snapshots which
+> assets a token may write to when it is issued, so a token minted before you
+> ran `POST /<waba-id>/subscribed_apps` keeps *reading* fine while every send
+> fails with `(#131005) Access denied`. Eliminate that before chasing
+> permissions or allow-lists.
 
 ### Deploying to a remote host (`scripts/deploy.sh`)
 

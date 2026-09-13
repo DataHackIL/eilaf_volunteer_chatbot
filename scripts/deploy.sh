@@ -241,6 +241,10 @@ fi
 
 echo "deploy: syncing to $TARGET:~/$REMOTE_DIR"
 remote "mkdir -p ~/$REMOTE_DIR"
+# Created here, not by Docker: an absent bind-mount source is created by the
+# daemon as root, leaving captured conversations unreadable to the SSH user
+# without sudo. rsync will not make it either — it is excluded below.
+remote "mkdir -p ~/$REMOTE_DIR/data/reports"
 
 RSYNC_EXCLUDES=(
     --exclude '.git/'

@@ -333,13 +333,39 @@ fi
 
 # The tunnel prints its hostname a few seconds after the container starts; a
 # named tunnel (TUNNEL_TOKEN) prints nothing here because its URL is fixed.
+#
+# Reading that hostname out of the logs is NOT enough on its own. During
+# --force-recreate the outgoing tunnel's lines are still there to be read, so
+# the newest-looking URL can be one that is already dead — and printing it is
+# worse than printing nothing, because whoever pastes it into Meta gets a
+# callback URL Meta reports as healthy while every message goes nowhere. That
+# is the exact failure this block exists to prevent, and it has happened.
+#
+# So every candidate is checked against the live verification handshake, and
+# only a URL that answers with our own challenge is printed.
+VERIFY_TOKEN="$(grep -E '^WHATSAPP_VERIFY_TOKEN=' .env | tail -1 | cut -d= -f2-)"
 URL=""
-for _ in $(seq 1 30); do
+if [ "$CHECK_TOKEN" -eq 0 ]; then
+    # --no-token-check means "assume no outbound network"; fall back to the old
+    # read-and-hope, clearly labelled as unverified.
     URL=$(remote "cd ~/$REMOTE_DIR/app/whatsapp && docker compose logs tunnel 2>/dev/null" \
           | grep -oE 'https://[a-z0-9-]+\.trycloudflare\.com' | tail -1 || true)
-    [ -n "$URL" ] && break
-    sleep 2
-done
+    [ -n "$URL" ] && echo "deploy: (unverified — --no-token-check)"
+else
+    echo "deploy: verifying the tunnel URL"
+    for _ in $(seq 1 30); do
+        candidates=$(remote "cd ~/$REMOTE_DIR/app/whatsapp && docker compose logs tunnel 2>/dev/null" \
+              | grep -oE 'https://[a-z0-9-]+\.trycloudflare\.com' | sort -u || true)
+        for candidate in $candidates; do
+            got=$(curl -s --max-time 15 \
+                "$candidate/webhook?hub.mode=subscribe&hub.verify_token=$VERIFY_TOKEN&hub.challenge=deploycheck" \
+                2>/dev/null || true)
+            if [ "$got" = "deploycheck" ]; then URL="$candidate"; break; fi
+        done
+        [ -n "$URL" ] && break
+        sleep 2
+    done
+fi
 
 echo
 echo "deploy: done."
@@ -354,8 +380,10 @@ deploy: survives a redeploy, switch to a named tunnel (TUNNEL_TOKEN) — see the
 deploy: commented block in app/whatsapp/docker-compose.yml.
 EOF
 else
-    echo "deploy: no trycloudflare URL in the tunnel logs — expected if you run a"
-    echo "deploy: named tunnel; otherwise check: docker compose logs tunnel"
+    echo "deploy: no WORKING trycloudflare URL — expected if you run a named" >&2
+    echo "deploy: tunnel (its URL is fixed and never printed here). Otherwise" >&2
+    echo "deploy: the tunnel is not serving this deploy; check:" >&2
+    echo "deploy:   docker compose logs tunnel" >&2
 fi
 echo
 echo "deploy: logs —  ssh ${SSH_KEY:+-i $SSH_KEY }$TARGET 'cd $REMOTE_DIR/app/whatsapp && docker compose logs -f chatbot'"

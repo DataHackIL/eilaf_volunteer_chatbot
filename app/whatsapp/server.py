@@ -99,8 +99,10 @@ async def lifespan(_app: FastAPI):
         )
         if not config.REPORT_BUCKET:
             logger.warning(
-                "no EILAF_REPORT_BUCKET set: saving to a local directory, which "
-                "is discarded with the container on the next --force-recreate"
+                "no EILAF_REPORT_BUCKET set: saving to %s. Under compose that "
+                "path is bind-mounted from the host, so it survives a recreate "
+                "— but it is one box's disk, not S3, and nothing backs it up",
+                config.REPORT_DIR,
             )
     # Before the slow model load, so a dead credential is reported in seconds
     # rather than after a minute of warming a pipeline that cannot reply.

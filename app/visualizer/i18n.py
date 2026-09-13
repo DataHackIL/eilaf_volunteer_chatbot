@@ -76,6 +76,24 @@ class HebrewText(Enum):
     CHANGE_LANGUAGE = "לשינוי שפה: לחצו על אחד הכפתורים, או כתבו \"שפה\" בכל שלב."
     RESTART_DONE = "התחלנו מחדש."
     RESTART_HINT = "לאיפוס השיחה בכל שלב: כתבו \"התחל מחדש\"."
+    # Reporting a conversation (saved only after an explicit approval).
+    REPORT_HINT = "לדיווח על השיחה בכל שלב: כתבו \"דיווח\"."
+    REPORT_CONSENT = (
+        "דיווח על השיחה פירושו שנשמור עותק שלה באחסון לטווח ארוך, "
+        "כדי שצוות אילאף יוכל לקרוא אותה ולטפל בה. "
+        "השיחה תישמר רק אם תלחצו על אישור. מספר הטלפון שלכם לא יישמר."
+    )
+    REPORT_APPROVE = "אישור"
+    REPORT_CANCEL = "ביטול"
+    REPORT_CANCELLED = "הדיווח בוטל, ולא נשמר דבר."
+    REPORT_REASON_PROMPT = (
+        "מה תרצו שנדע על השיחה? אפשר לכתוב בכמה מילים, או ללחוץ על דילוג."
+    )
+    REPORT_CONTACT_PROMPT = (
+        "אם תרצו שנחזור אליכם, כתבו טלפון או אימייל. אחרת לחצו על דילוג."
+    )
+    REPORT_DONE = "הדיווח נשמר. תודה."
+    REPORT_FAILED = "שמירת הדיווח נכשלה, ולא נשמר דבר. אפשר לנסות שוב מאוחר יותר."
 
 
 class ArabicText(Enum):
@@ -115,6 +133,24 @@ class ArabicText(Enum):
     CHANGE_LANGUAGE = "لتغيير اللغة: اضغطوا على أحد الأزرار، أو اكتبوا \"لغة\" بأي وقت."
     RESTART_DONE = "بدأنا من جديد."
     RESTART_HINT = "لإعادة المحادثة في أي وقت: اكتبوا \"من البداية\"."
+    # Reporting a conversation (saved only after an explicit approval).
+    REPORT_HINT = "للتبليغ عن المحادثة بأي وقت: اكتبوا \"تبليغ\"."
+    REPORT_CONSENT = (
+        "التبليغ عن المحادثة يعني إنّنا رح نحتفظ بنسخة منها بتخزين طويل الأمد، "
+        "حتى فريق إيلاف يقدر يقرأها ويتابعها. "
+        "بتنحفظ بس إذا ضغطتوا موافقة. رقم تلفونكم ما بينحفظ."
+    )
+    REPORT_APPROVE = "موافقة"
+    REPORT_CANCEL = "إلغاء"
+    REPORT_CANCELLED = "التبليغ انلغى، وما انحفظ إشي."
+    REPORT_REASON_PROMPT = (
+        "شو بدكم نعرف عن المحادثة؟ فيكم تكتبوا بكلمتين، أو تضغطوا تخطّي."
+    )
+    REPORT_CONTACT_PROMPT = (
+        "إذا بدكم نرجع نتواصل معكم، اكتبوا تلفون أو إيميل. غير هيك اضغطوا تخطّي."
+    )
+    REPORT_DONE = "التبليغ انحفظ. شكراً إلكم."
+    REPORT_FAILED = "ما زبط حفظ التبليغ، وما انحفظ إشي. فيكم تجرّبوا بعدين."
 
 
 class EnglishText(Enum):
@@ -153,6 +189,29 @@ class EnglishText(Enum):
     CHANGE_LANGUAGE = "To change language: tap one of the buttons, or type \"language\" at any point."
     RESTART_DONE = "Started fresh."
     RESTART_HINT = "To restart the conversation at any point, type \"restart\"."
+    # Reporting a conversation (saved only after an explicit approval).
+    REPORT_HINT = "To report this conversation at any point, type \"report\"."
+    REPORT_CONSENT = (
+        "Reporting means we keep a copy of this conversation in long-term "
+        "storage, so the Eilaf team can read it and follow up. "
+        "It is saved only if you tap Approve. Your phone number is not saved."
+    )
+    REPORT_APPROVE = "Approve"
+    REPORT_CANCEL = "Cancel"
+    REPORT_CANCELLED = "The report was cancelled, and nothing was saved."
+    REPORT_REASON_PROMPT = (
+        "What would you like us to know about this conversation? "
+        "A few words, or tap Skip."
+    )
+    REPORT_CONTACT_PROMPT = (
+        "If you'd like us to get back to you, type a phone number or an email. "
+        "Otherwise tap Skip."
+    )
+    REPORT_DONE = "The report was saved. Thank you."
+    REPORT_FAILED = (
+        "The report could not be saved, and nothing was stored. "
+        "You can try again later."
+    )
 
 
 TEXTS: dict[Language, type[Enum]] = {

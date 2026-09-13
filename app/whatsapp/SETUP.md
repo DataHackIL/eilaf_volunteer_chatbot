@@ -184,10 +184,79 @@ EILAF_ENV=prod docker compose up -d
 
 Leave it unset locally — nothing changes and the offline flow keeps working.
 
+`EILAF_ENV=prod` also makes `EILAF_REPORT_BUCKET` mandatory — see the next
+section for why.
+
 > Rotating the secret takes a container **recreate**, not a restart:
 > `config.py` reads the environment once at import, and `docker compose restart`
 > reuses the old container's environment. Use
 > `docker compose up -d --force-recreate chatbot`.
+
+### Reported conversations (`EILAF_REPORT_BUCKET`)
+
+A user can ask us to keep their conversation: they type the report phrase
+(`report` / `דיווח` / `تبليغ`, named in the welcome message), read what that
+means, and tap **Approve**. Only then is a JSON snapshot written — with an
+optional reason and optional contact details, each offered with a Skip button.
+
+What is stored is the conversation as it stood when the phrase arrived. It
+carries **no `wa_id`**: on WhatsApp that is the user's phone number, and the
+consent message promises it is not saved. The only contact in the file is the
+one the user typed themselves.
+
+| Variable | Default | What it does |
+|---|---|---|
+| `EILAF_REPORT_BUCKET` | *(empty)* | S3 bucket. Empty → the local store below. **Mandatory under `EILAF_ENV=prod`.** |
+| `EILAF_REPORT_PREFIX` | `conversations/` | Key prefix inside the bucket. |
+| `EILAF_REPORT_REGION` | *(empty)* | Empty lets boto3 resolve it (instance metadata). Set it if the bucket is in another region. |
+| `EILAF_REPORT_DIR` | `data/reports` | Local fallback directory. Dev and tests only. |
+
+The bucket in use is **`eilaf-dev-chatbot-logs`** (`eu-north-1`, the same region
+as the EC2 instance — so `EILAF_REPORT_REGION` can stay empty there, and boto3
+resolves the region from instance metadata):
+
+```bash
+EILAF_REPORT_BUCKET=eilaf-dev-chatbot-logs
+```
+
+Off the instance — a dev machine, where there is no instance metadata — set
+`EILAF_REPORT_REGION=eu-north-1` as well.
+
+**Nothing needs to be set up to run locally.** With no bucket, reports are
+written to `data/reports/YYYY/MM/DD/` (gitignored) and the whole flow works
+offline. The bucket only becomes necessary on a deployed host — and the compose
+default is deliberately empty, so a dev run never uploads by accident.
+
+Why it is mandatory in prod: without one, the fallback writes *inside the
+container*, which the next `docker compose up --force-recreate` deletes. The
+save reports success, the user is told their report was kept, and it is gone —
+so `config.py` raises at import instead, like the app secret.
+
+**Bucket checklist** — worth confirming on `eilaf-dev-chatbot-logs`, since these
+are conversations with victims of violence:
+
+1. Block all public access, and leave default SSE-S3 encryption on. A lifecycle
+   rule expiring objects after your retention period is worth adding now rather
+   than once there are thousands.
+2. Give the EC2 instance role exactly one permission, scoped to the prefix:
+
+   ```json
+   {
+     "Version": "2012-10-17",
+     "Statement": [{
+       "Effect": "Allow",
+       "Action": "s3:PutObject",
+       "Resource": "arn:aws:s3:::eilaf-dev-chatbot-logs/conversations/*"
+     }]
+   }
+   ```
+
+   Write-only on purpose: the bot never needs to read a report back, so a
+   compromised instance cannot enumerate what it has already sent. No AWS key
+   goes in `.env` — boto3 takes the role from instance metadata.
+3. Set `EILAF_REPORT_BUCKET` and recreate the container
+   (`docker compose up -d --force-recreate chatbot` — `config.py` reads the
+   environment once at import, so a plain `restart` keeps the old value).
 
 ### Getting a stable public URL (the tunnel problem)
 

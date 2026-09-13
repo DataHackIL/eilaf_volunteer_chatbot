@@ -37,6 +37,17 @@ services:
       # answering). Off by default: the corpus has almost no age/gender/locality
       # tags, so the answers changed nothing and only delayed the reply.
       WHATSAPP_COLLECT_FACTS: "${WHATSAPP_COLLECT_FACTS:-}"
+      # Where a conversation goes once the user asked us to keep it and tapped
+      # Approve. The bucket is MANDATORY under EILAF_ENV=prod: without it the
+      # store falls back to a directory inside the container, which the next
+      # --force-recreate deletes, losing reports we told the user we had kept.
+      # No AWS key here or in .env — boto3 takes the EC2 instance role, which
+      # needs only s3:PutObject on the prefix (see SETUP.md).
+      EILAF_REPORT_BUCKET: "${EILAF_REPORT_BUCKET:-}"
+      EILAF_REPORT_PREFIX: "${EILAF_REPORT_PREFIX:-conversations/}"
+      # Empty lets boto3 resolve the region itself (instance metadata); set it
+      # when the bucket is not in the instance's own region.
+      EILAF_REPORT_REGION: "${EILAF_REPORT_REGION:-}"
     ports:
       - "8000:8000"
     volumes:

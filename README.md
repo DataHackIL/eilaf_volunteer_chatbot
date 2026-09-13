@@ -192,7 +192,9 @@ compose's `env_file` makes one; a value set from Python later will not be seen).
 An empty value falls back to the repo-local default.
 
 For a deployment (EC2, S3) this is the hook to use, but note it is a
-*filesystem* path — nothing here speaks the S3 API. Point it at S3 through a
+*filesystem* path — the corpus store does not speak the S3 API. (One thing now
+does: `app/whatsapp/reporting` writes reported conversations to a bucket with
+boto3. The two are unrelated — a report never lands in the corpus.) Point it at S3 through a
 mount (`mountpoint-s3`, `s3fs`) or sync the bucket to local disk before start
 and point it at that copy. A synced local copy is the safer of the two: the
 embedding cache is a 20 MB `.npy` the pipeline memory-maps at boot and the

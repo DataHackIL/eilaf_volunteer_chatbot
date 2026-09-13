@@ -36,6 +36,14 @@ in the welcome message, matched exactly, acted on at once, no confirmation), it 
 ``_SESSIONS``: nothing else ever removes an entry, so without it the dict grows
 once per wa_id for the life of the process.
 
+Typing a report phrase (``report`` / ``דיווח`` / ``تبليغ``, also named in the
+welcome) offers to keep the conversation: the user is told that approving means
+we store a copy long-term, and only an explicit button tap — never typed text —
+sends it. A reason and contact details are then each offered with a Skip button.
+What is stored is the conversation as it stood when the phrase arrived, and it
+carries no ``wa_id``: that is the user's phone number, and the consent message
+says it is not saved. See :mod:`app.whatsapp.reporting`.
+
 State is in-memory (``_SESSIONS``); it is per-process and resets on restart,
 which is fine for the single-process interim deployment. Swapping it for SQLite
 later is a localized change. ``handle_message`` is synchronous and may call the
@@ -44,22 +52,29 @@ later is a localized change. ``handle_message`` is synchronous and may call the
 
 from __future__ import annotations
 
+import logging
 import time
 from collections.abc import Sequence
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
+from datetime import UTC, datetime
 from enum import Enum, auto
 
 from app.language import detect_language
 from app.visualizer.i18n import TEXTS, Language
 from app.whatsapp import config
 from app.whatsapp.pipeline_singleton import get_pipeline
+from app.whatsapp.reporting import build_report, get_report_store
 from chatbot.rag.pipeline.pipeline import DEFAULT_CONTEXT_ANCHOR
+
+logger = logging.getLogger("whatsapp.conversation")
 
 # Button ids (echoed back by WhatsApp as interactive ``button_reply.id``).
 _SKIP = "skip"
 _REFINE = "refine"
 _LANG_PREFIX = "lang:"
 _GENDER_PREFIX = "gender:"
+_REPORT_APPROVE = "report:approve"
+_REPORT_CANCEL = "report:cancel"
 
 # Used when the opening message carries no script signal (digits, emoji, or a
 # non-text message such as a voice note).
@@ -101,14 +116,63 @@ _RESTART_KEYWORDS = frozenset(
 )
 
 
+# Same shape as the restart phrases, and named the same way in the welcome
+# message: one exact phrase per language, matched after strip/lower, so a
+# question *about* reporting is still a question. Unlike a restart this is not
+# destructive — it opens a consent message and nothing is stored until the user
+# taps Approve — so a stray match costs one tappable message, not a lost
+# conversation.
+_REPORT_KEYWORDS = frozenset(
+    {
+        "report",
+        "דיווח",
+        "تبليغ",
+    }
+)
+
+
 class Step(Enum):
     WELCOME = auto()  # first contact: detect the language
     QUERY = auto()  # the steady state — a message is a question, answered at once
     REFINE = auto()  # opt-in: the user tapped "Add details" after an answer
+    # The report exchange: consent, then two optional questions.
+    REPORT_CONSENT = auto()
+    REPORT_REASON = auto()
+    REPORT_CONTACT = auto()
     # Reached only under ``config.COLLECT_FACTS``.
     EVENT = auto()
     GENDER = auto()
     AGE = auto()
+
+
+@dataclass(frozen=True)
+class Turn:
+    """One message in either direction, as it would appear in a report."""
+
+    role: str  # "user" or "bot"
+    text: str
+    button_id: str | None = None
+    # Wall-clock UTC, as it will be read. ``Session.last_seen`` is monotonic and
+    # measures elapsed time; it is not a date and cannot be rendered as one.
+    # Nothing does arithmetic on this, so it is stored in its final form.
+    at: str = field(
+        default_factory=lambda: datetime.now(UTC).isoformat(timespec="seconds")
+    )
+
+
+@dataclass
+class ReportDraft:
+    """A report being assembled, from the trigger until it is saved or dropped.
+
+    ``turns`` is a snapshot taken when the report phrase arrived, so the consent
+    exchange that follows — and anything the user says afterwards — is not in
+    what gets stored. That keeps the file equal to the conversation the user was
+    looking at when they decided to report it, which is what they approved.
+    """
+
+    turns: list[Turn]
+    reason: str | None = None
+    contact: str | None = None
 
 
 @dataclass
@@ -123,6 +187,11 @@ class Session:
     query: str = ""
     context: str = DEFAULT_CONTEXT_ANCHOR
     facts: dict = field(default_factory=dict)
+    # Every turn so far, kept only in memory and only for the life of the
+    # session: without it there is nothing for a report to contain. It leaves
+    # the process only if the user asks for that explicitly and approves.
+    transcript: list[Turn] = field(default_factory=list)
+    report: ReportDraft | None = None
 
 
 @dataclass
@@ -142,6 +211,12 @@ _SESSIONS: dict[str, Session] = {}
 # running it occasionally is enough.
 _SWEEP_INTERVAL_SECONDS = 60.0
 _last_sweep: float = 0.0
+
+# Oldest turns are dropped past this. A session lives up to SESSION_TTL_SECONDS
+# (3h by default) and nothing else bounds the transcript, so a long or abusive
+# conversation would otherwise grow a process-global list without limit. A
+# report of a conversation this long is already far more than anyone will read.
+_MAX_TURNS = 200
 
 
 def _is_expired(session: Session, now: float) -> bool:
@@ -171,7 +246,57 @@ def handle_message(
     Exactly one of ``text`` (a typed message) or ``button_id`` (a tapped
     interactive reply) is normally set. Unrecognised input at a step simply
     re-prompts that step.
+
+    This is a thin recording wrapper around :func:`_dispatch`. Keeping the
+    transcript here — in one place, rather than in each step handler — is what
+    stops it drifting as steps are added, and it captures typed text, button
+    taps and every reply alike.
+
+    Two rules keep the report exchange out of the transcript, and both matter:
+
+    * Turns are recorded *after* the dispatch, so a handler running inside it
+      sees the conversation as it stood before this message. That is what
+      ``_start_report`` snapshots, and it is why the trigger phrase is not in
+      the stored file.
+    * The exchange itself is not recorded at all. The transcript is meant to be
+      the *conversation*; the consent turns are machinery. Were they recorded,
+      a second report in the same session would carry the first one's reason
+      and contact details as if the user had said them to us.
     """
+    existing = _SESSIONS.get(wa_id)
+    before = existing.step if existing is not None else None
+
+    replies = _dispatch(wa_id, text, button_id)
+
+    # A restart replaces the session and an expiry can delete one, so re-read it
+    # rather than holding a reference across the dispatch. The identity check
+    # keeps a *replaced* session from inheriting the old one's step: coming back
+    # after the TTL expired mid-report is a new conversation, and its first turn
+    # is ordinary.
+    session = _SESSIONS.get(wa_id)
+    if session is None:
+        return replies
+    was_reporting = session is existing and _is_report_step(before)
+    if not (was_reporting or _is_report_step(session.step)):
+        _record(session, Turn("user", (text or "").strip(), button_id))
+        for reply in replies:
+            _record(session, Turn("bot", reply.body))
+    return replies
+
+
+def _is_report_step(step: Step | None) -> bool:
+    return step in (Step.REPORT_CONSENT, Step.REPORT_REASON, Step.REPORT_CONTACT)
+
+
+def _record(session: Session, turn: Turn) -> None:
+    session.transcript.append(turn)
+    if len(session.transcript) > _MAX_TURNS:
+        del session.transcript[: len(session.transcript) - _MAX_TURNS]
+
+
+def _dispatch(
+    wa_id: str, text: str | None = None, button_id: str | None = None
+) -> list[Reply]:
     now = time.monotonic()
     _sweep(now)
 
@@ -195,6 +320,11 @@ def handle_message(
     if text and text.strip().lower() in _RESTART_KEYWORDS:
         return _restart(wa_id, session)
 
+    # Reporting is handled here for the same reason, and deliberately keeps the
+    # restart check ahead of it: someone who wants out mid-report gets out.
+    if text and text.strip().lower() in _REPORT_KEYWORDS:
+        return _start_report(session, text)
+
     # Language changes are handled ahead of the step dispatch: a WhatsApp button
     # stays tappable in the chat history, so ``lang:`` can arrive many turns
     # after the message that offered it, and the keyword deliberately works
@@ -217,6 +347,18 @@ def handle_message(
         return _handle_query(session, text)
     if session.step is Step.REFINE:
         return _handle_refine(session, text)
+    # A report step with no draft behind it has nothing to collect into, and
+    # would fail deep inside a background task (i.e. as silence for the user).
+    # Nothing reaches this today; it costs one comparison to keep it that way.
+    if _is_report_step(session.step) and session.report is None:
+        session.step = Step.QUERY
+        return _reprompt(session)
+    if session.step is Step.REPORT_CONSENT:
+        return _handle_report_consent(session, button_id)
+    if session.step is Step.REPORT_REASON:
+        return _handle_report_reason(session, text, button_id)
+    if session.step is Step.REPORT_CONTACT:
+        return _handle_report_contact(session, text, button_id)
     if session.step is Step.EVENT:
         return _handle_event(session, text, button_id)
     if session.step is Step.GENDER:
@@ -239,6 +381,7 @@ def _handle_welcome(session: Session, text: str | None) -> list[Reply]:
             t.QUERY_PROMPT.value,
             t.CHANGE_LANGUAGE.value,
             t.RESTART_HINT.value,
+            t.REPORT_HINT.value,
         )
     )
     return [Reply(body, buttons=_switch_buttons(session.language))]
@@ -308,6 +451,88 @@ def _handle_refine(session: Session, text: str | None) -> list[Reply]:
     return _run_pipeline(session)
 
 
+def _start_report(session: Session, text: str | None) -> list[Reply]:
+    """Snapshot the conversation and explain what approving would mean."""
+    if session.step is Step.WELCOME:
+        # The trigger phrase is itself language-specific, so it doubles as the
+        # language sample the opening message would otherwise have been. Without
+        # this, someone whose first message is "report" reads the consent text —
+        # the one message that most needs to be understood — in the default
+        # language rather than theirs.
+        session.language = detect_language(text) or DEFAULT_LANGUAGE
+    session.report = ReportDraft(turns=list(session.transcript))
+    session.step = Step.REPORT_CONSENT
+    return _reprompt(session)
+
+
+def _handle_report_consent(session: Session, button_id: str | None) -> list[Reply]:
+    """Only the button approves. Typed text re-asks; it is not consent.
+
+    Reading a typed "yes" (or anything else) as approval would mean guessing at
+    consent for permanent storage, and the guess is wrong precisely for the user
+    who did not follow the message. The button is unambiguous, so it is the only
+    way through.
+    """
+    if button_id == _REPORT_CANCEL:
+        return _cancel_report(session)
+    if button_id != _REPORT_APPROVE:
+        return _reprompt(session)
+    session.step = Step.REPORT_REASON
+    return _reprompt(session)
+
+
+def _handle_report_reason(
+    session: Session, text: str | None, button_id: str | None
+) -> list[Reply]:
+    if button_id != _SKIP and text and text.strip():
+        session.report.reason = text.strip()
+    session.step = Step.REPORT_CONTACT
+    return _reprompt(session)
+
+
+def _handle_report_contact(
+    session: Session, text: str | None, button_id: str | None
+) -> list[Reply]:
+    if button_id != _SKIP and text and text.strip():
+        session.report.contact = text.strip()
+    return _save_report(session)
+
+
+def _cancel_report(session: Session) -> list[Reply]:
+    session.report = None
+    session.step = Step.QUERY
+    return [Reply(TEXTS[session.language].REPORT_CANCELLED.value)]
+
+
+def _save_report(session: Session) -> list[Reply]:
+    """Write the approved snapshot, and say plainly whether it was written.
+
+    The draft is cleared and the step reset *before* the write, so a failure
+    leaves the user back in the normal flow rather than stuck in a report they
+    cannot finish. Note what the document does not contain: the ``wa_id``. On
+    WhatsApp that is the user's phone number, and the consent message promises
+    it is not saved — the only contact here is the one they typed themselves.
+    """
+    t = TEXTS[session.language]
+    draft = session.report
+    session.report = None
+    session.step = Step.QUERY
+
+    report = build_report(
+        language=session.language.value,
+        turns=[asdict(turn) for turn in draft.turns],
+        reason=draft.reason,
+        contact=draft.contact,
+    )
+    try:
+        location = get_report_store().save(report)
+    except Exception:  # noqa: BLE001 — any storage failure is the user's to hear
+        logger.exception("failed saving report %s", report["report_id"])
+        return [Reply(t.REPORT_FAILED.value)]
+    logger.info("saved report to %s", location)
+    return [Reply(t.REPORT_DONE.value)]
+
+
 def _handle_event(
     session: Session, text: str | None, button_id: str | None
 ) -> list[Reply]:
@@ -349,6 +574,20 @@ def _reprompt(session: Session) -> list[Reply]:
     t = TEXTS[session.language]
     if session.step is Step.REFINE:
         return [Reply(t.EXPAND_PROMPT.value)]
+    if session.step is Step.REPORT_CONSENT:
+        return [
+            Reply(
+                t.REPORT_CONSENT.value,
+                buttons=[
+                    (_REPORT_APPROVE, t.REPORT_APPROVE.value),
+                    (_REPORT_CANCEL, t.REPORT_CANCEL.value),
+                ],
+            )
+        ]
+    if session.step is Step.REPORT_REASON:
+        return [Reply(t.REPORT_REASON_PROMPT.value, buttons=[(_SKIP, t.SKIP.value)])]
+    if session.step is Step.REPORT_CONTACT:
+        return [Reply(t.REPORT_CONTACT_PROMPT.value, buttons=[(_SKIP, t.SKIP.value)])]
     if session.step is Step.EVENT:
         return [Reply(t.CONTEXT_PROMPT.value, buttons=[(_SKIP, t.SKIP.value)])]
     if session.step is Step.GENDER:

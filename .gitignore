@@ -42,5 +42,10 @@ data/static/**/*.json
 # Cached corpus embeddings (regenerated on demand)
 data/static/**/.embeddings/
 
+# Reported conversations written by the local (dev-only) report store. Real
+# conversations, kept because a user asked us to — they belong in the bucket,
+# never in git.
+data/reports/
+
 # Local compose overrides (per-machine dev tweaks, never shared)
 docker-compose.override.yml

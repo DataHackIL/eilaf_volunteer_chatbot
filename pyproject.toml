@@ -32,6 +32,10 @@ dependencies = [
     "fastapi",
     "uvicorn[standard]",
     "httpx",
+    # Reported conversations go to S3 (app/whatsapp/reporting). Base, not an
+    # extra: the webhook server itself writes them, and the image is built with
+    # a plain `uv sync --no-dev`. Costs ~90 MB of botocore.
+    "boto3",
 ]
 
 # Opt-in units. The WhatsApp webhook server imports neither, and together they

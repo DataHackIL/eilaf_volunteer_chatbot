@@ -47,6 +47,20 @@ SESSION_TTL_SECONDS = int(os.environ.get("EILAF_SESSION_TTL", 3 * 60 * 60))
 # delay the answer. Turn it on once an enrichment pass populates those tags.
 COLLECT_FACTS = os.environ.get("WHATSAPP_COLLECT_FACTS", "") == "1"
 
+# --- reported conversations --------------------------------------------------
+# Where a conversation goes once the user has read the consent message and
+# tapped Approve. With a bucket set we write to S3; without one, to a local
+# directory (dev machines and tests only — see the production guard below).
+# No AWS key lives here or in .env: on EC2 boto3 takes the instance role.
+REPORT_BUCKET = os.environ.get("EILAF_REPORT_BUCKET", "")
+REPORT_PREFIX = os.environ.get("EILAF_REPORT_PREFIX", "conversations/")
+# Empty lets boto3 resolve the region itself (instance metadata, ~/.aws/config,
+# AWS_REGION); set it when the bucket is not in the instance's own region.
+REPORT_REGION = os.environ.get("EILAF_REPORT_REGION", "")
+REPORT_DIR = os.environ.get("EILAF_REPORT_DIR", "") or str(
+    Path(__file__).resolve().parents[2] / "data" / "reports"
+)
+
 
 def require(name: str, value: str) -> str:
     """Return ``value`` or raise if it's empty — a clear miss-config message."""
@@ -66,6 +80,11 @@ def require(name: str, value: str) -> str:
 # (compose restarts it) rather than serving traffic unauthenticated.
 if ENV == "prod":
     require("WHATSAPP_APP_SECRET", APP_SECRET)
+    # Without a bucket the report store falls back to a directory *inside the
+    # container*, which every `docker compose up --force-recreate` deletes. That
+    # loses reports the user was told we had kept — a promise broken invisibly,
+    # since the save itself succeeds. Fail at import instead, like the secret.
+    require("EILAF_REPORT_BUCKET", REPORT_BUCKET)
 
 
 def graph_url() -> str:

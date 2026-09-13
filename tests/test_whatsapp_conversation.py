@@ -11,17 +11,23 @@ from __future__ import annotations
 import hashlib
 import hmac
 import importlib
+import json
 import logging
 import time
+from pathlib import Path
 
 import httpx
-
 import pytest
 from fastapi.testclient import TestClient
 
 from app.visualizer.i18n import TEXTS, ArabicText, EnglishText, HebrewText, Language
-from app.visualizer.i18n import TEXTS, Language
 from app.whatsapp import client, config, conversation, server
+from app.whatsapp.reporting import (
+    LocalReportStore,
+    S3ReportStore,
+    build_report,
+    report_path,
+)
 from chatbot.rag.documents.documents import Document
 
 
@@ -488,8 +494,22 @@ def test_prod_refuses_to_import_without_app_secret(reload_config):
 
 
 def test_prod_imports_with_app_secret(reload_config):
-    reloaded = reload_config(EILAF_ENV="prod", WHATSAPP_APP_SECRET="s3cret")
+    reloaded = reload_config(
+        EILAF_ENV="prod",
+        WHATSAPP_APP_SECRET="s3cret",
+        EILAF_REPORT_BUCKET="eilaf-reports",
+    )
     assert reloaded.APP_SECRET == "s3cret"
+
+
+def test_prod_refuses_to_import_without_a_report_bucket(reload_config):
+    """Without one the report store falls back to a directory inside the
+    container, which --force-recreate deletes — losing reports the user was
+    told we had kept, with the save itself reporting success."""
+    with pytest.raises(RuntimeError, match="EILAF_REPORT_BUCKET"):
+        reload_config(
+            EILAF_ENV="prod", WHATSAPP_APP_SECRET="s3cret", EILAF_REPORT_BUCKET=""
+        )
 
 
 def test_dev_still_tolerates_a_missing_app_secret(reload_config):
@@ -701,3 +721,381 @@ def test_welcome_tells_the_user_how_to_restart(fake_pipeline):
     conversation.reset("u-hint")
     replies = conversation.handle_message("u-hint", text="hello")
     assert TEXTS[Language.ENGLISH].RESTART_HINT.value in replies[0].body
+
+
+# --------------------------------------------------------------------------- #
+# Reporting a conversation                                                     #
+# --------------------------------------------------------------------------- #
+
+
+class _FakeStore:
+    """Records what would have been written, and can be made to fail."""
+
+    def __init__(self, fail=False):
+        self.saved = []
+        self.fail = fail
+
+    def save(self, report):
+        if self.fail:
+            raise RuntimeError("bucket on fire")
+        self.saved.append(report)
+        return f"fake://{report['report_id']}"
+
+
+@pytest.fixture
+def store(monkeypatch):
+    fake = _FakeStore()
+    monkeypatch.setattr(conversation, "get_report_store", lambda: fake)
+    return fake
+
+
+def _report(wa_id, reason=None, contact=None):
+    """Walk the whole report exchange; None means "tap Skip". Returns the last replies."""
+    conversation.handle_message(wa_id, text="report")
+    conversation.handle_message(wa_id, button_id="report:approve")
+    conversation.handle_message(
+        wa_id, **({"button_id": "skip"} if reason is None else {"text": reason})
+    )
+    return conversation.handle_message(
+        wa_id, **({"button_id": "skip"} if contact is None else {"text": contact})
+    )
+
+
+def test_the_transcript_records_both_directions(fake_pipeline):
+    """Nothing was kept before this; without it a report has nothing to carry."""
+    conversation.reset("u-tr")
+    conversation.handle_message("u-tr", text="hello")
+    conversation.handle_message("u-tr", text="what am I entitled to?")
+
+    transcript = conversation._SESSIONS["u-tr"].transcript
+    assert [t.role for t in transcript] == ["user", "bot", "user", "bot", "bot"]
+    assert transcript[0].text == "hello"
+    assert "answer[" in transcript[3].text
+
+
+def test_the_transcript_is_capped(fake_pipeline, monkeypatch):
+    """A session lives up to 3h; nothing else bounds this list."""
+    monkeypatch.setattr(conversation, "_MAX_TURNS", 6)
+    conversation.reset("u-cap")
+    for _ in range(20):
+        conversation.handle_message("u-cap", text="what am I entitled to?")
+
+    transcript = conversation._SESSIONS["u-cap"].transcript
+    assert len(transcript) == 6
+    assert transcript[-1].role == "bot", "the newest turns are the ones kept"
+
+
+def test_the_report_phrase_offers_consent_with_buttons(fake_pipeline, store):
+    conversation.reset("u-rep")
+    conversation.handle_message("u-rep", text="hello")
+    replies = conversation.handle_message("u-rep", text="report")
+
+    assert TEXTS[Language.ENGLISH].REPORT_CONSENT.value in replies[0].body
+    assert _button_ids(replies[0]) == ["report:approve", "report:cancel"]
+    assert conversation._SESSIONS["u-rep"].step is conversation.Step.REPORT_CONSENT
+    assert store.saved == [], "nothing is stored before the tap"
+
+
+def test_typed_text_at_the_consent_step_is_not_consent(fake_pipeline, store):
+    """Reading a typed "yes" as approval means guessing at consent for permanent
+    storage — and guessing wrong for exactly the user who missed the message."""
+    for answer in ("yes", "ok", "כן", "نعم", "approve"):
+        conversation.reset("u-typed")
+        conversation.handle_message("u-typed", text="hello")
+        conversation.handle_message("u-typed", text="report")
+        replies = conversation.handle_message("u-typed", text=answer)
+
+        assert store.saved == [], f"{answer!r} wrongly approved a report"
+        assert _button_ids(replies[0]) == ["report:approve", "report:cancel"]
+        assert conversation._SESSIONS["u-typed"].step is conversation.Step.REPORT_CONSENT
+
+
+def test_cancel_saves_nothing_and_returns_to_the_question_step(fake_pipeline, store):
+    conversation.reset("u-cancel")
+    conversation.handle_message("u-cancel", text="hello")
+    conversation.handle_message("u-cancel", text="report")
+    replies = conversation.handle_message("u-cancel", button_id="report:cancel")
+
+    assert store.saved == []
+    assert TEXTS[Language.ENGLISH].REPORT_CANCELLED.value in replies[0].body
+    assert conversation._SESSIONS["u-cancel"].step is conversation.Step.QUERY
+    assert conversation._SESSIONS["u-cancel"].report is None
+
+
+def test_approving_and_skipping_both_questions_saves_once(fake_pipeline, store):
+    conversation.reset("u-skip")
+    conversation.handle_message("u-skip", text="hello")
+    conversation.handle_message("u-skip", text="what am I entitled to?")
+    replies = _report("u-skip")
+
+    assert len(store.saved) == 1
+    report = store.saved[0]
+    assert report["reason"] is None and report["contact"] is None
+    assert report["language"] == "en"
+    assert report["turns"], "the conversation itself was saved"
+    assert TEXTS[Language.ENGLISH].REPORT_DONE.value in replies[0].body
+    assert conversation._SESSIONS["u-skip"].step is conversation.Step.QUERY
+
+
+def test_a_typed_reason_and_contact_are_stored(fake_pipeline, store):
+    conversation.reset("u-detail")
+    conversation.handle_message("u-detail", text="hello")
+    _report("u-detail", reason="the answer was wrong", contact="me@example.com")
+
+    report = store.saved[0]
+    assert report["reason"] == "the answer was wrong"
+    assert report["contact"] == "me@example.com"
+
+
+def test_the_saved_report_carries_no_phone_number(fake_pipeline, store):
+    """The consent message promises this, and the wa_id *is* the phone number.
+
+    Asserted over the serialized document rather than a key, so a number
+    reaching the file by any route — a new field, a nested value — fails here.
+    """
+    wa_id = "972501234567"
+    conversation.reset(wa_id)
+    conversation.handle_message(wa_id, text="hello")
+    conversation.handle_message(wa_id, text="what am I entitled to?")
+    _report(wa_id)
+
+    report = store.saved[0]
+    assert "wa_id" not in report
+    assert wa_id not in json.dumps(report, ensure_ascii=False)
+    assert report["contact"] is None
+
+
+def test_the_snapshot_excludes_the_report_exchange(fake_pipeline, store):
+    """What is stored is the conversation the user was looking at when they
+    decided to report it — not the consent turns that decision produced."""
+    conversation.reset("u-snap")
+    conversation.handle_message("u-snap", text="hello")
+    conversation.handle_message("u-snap", text="what am I entitled to?")
+    before = len(conversation._SESSIONS["u-snap"].transcript)
+    _report("u-snap", reason="a reason", contact="me@example.com")
+
+    turns = store.saved[0]["turns"]
+    assert len(turns) == before
+    blob = json.dumps(turns, ensure_ascii=False)
+    assert TEXTS[Language.ENGLISH].REPORT_CONSENT.value not in blob
+    assert "a reason" not in blob and "me@example.com" not in blob
+    # The trigger itself is a command, not something the user said to us. (The
+    # welcome does contain the word, since it advertises the phrase — so this
+    # checks for the turn, not the substring.)
+    assert not [t for t in turns if t["text"].lower() == "report"]
+
+
+def test_a_second_report_does_not_carry_the_first_ones_contact_details(
+    fake_pipeline, store
+):
+    """The consent turns are machinery, not conversation, so they are never
+    recorded. Otherwise the contact details typed into one report would reappear
+    inside the next as if the user had said them to us."""
+    conversation.reset("u-twice")
+    conversation.handle_message("u-twice", text="hello")
+    conversation.handle_message("u-twice", text="what am I entitled to?")
+    _report("u-twice", reason="first reason", contact="me@example.com")
+    _report("u-twice")
+
+    first, second = store.saved
+    assert second["contact"] is None and second["reason"] is None
+    blob = json.dumps(second["turns"], ensure_ascii=False)
+    assert "me@example.com" not in blob
+    assert "first reason" not in blob
+    assert second["turns"] == first["turns"], "the conversation itself is unchanged"
+
+
+def test_a_failing_store_tells_the_user_and_does_not_crash(
+    fake_pipeline, monkeypatch, caplog
+):
+    """Claiming a report was kept when it was not is the worst outcome here."""
+    monkeypatch.setattr(conversation, "get_report_store", lambda: _FakeStore(fail=True))
+    conversation.reset("u-fail")
+    conversation.handle_message("u-fail", text="hello")
+    with caplog.at_level(logging.ERROR):
+        replies = _report("u-fail")
+
+    assert TEXTS[Language.ENGLISH].REPORT_FAILED.value in replies[0].body
+    assert "bucket on fire" in caplog.text
+    assert conversation._SESSIONS["u-fail"].step is conversation.Step.QUERY
+    assert conversation._SESSIONS["u-fail"].report is None
+
+
+def test_restart_mid_report_abandons_it(fake_pipeline, store):
+    """Someone who wants out of the report gets out, and nothing is stored."""
+    conversation.reset("u-abort")
+    conversation.handle_message("u-abort", text="hello")
+    conversation.handle_message("u-abort", text="report")
+    conversation.handle_message("u-abort", button_id="report:approve")
+    conversation.handle_message("u-abort", text="restart")
+
+    assert store.saved == []
+    assert conversation._SESSIONS["u-abort"].step is conversation.Step.QUERY
+    assert conversation._SESSIONS["u-abort"].report is None
+
+
+def test_the_report_phrase_works_from_any_step(fake_pipeline, store):
+    conversation.reset("u-anystep")
+    conversation.handle_message("u-anystep", text="hello")
+    conversation.handle_message("u-anystep", text="what am I entitled to?")
+    conversation._SESSIONS["u-anystep"].step = conversation.Step.REFINE
+    replies = conversation.handle_message("u-anystep", text="report")
+
+    assert _button_ids(replies[0]) == ["report:approve", "report:cancel"]
+
+
+def test_a_question_containing_the_word_report_is_not_eaten(fake_pipeline, store):
+    """Exact-match only — a real question about police reports stays a question."""
+    conversation.reset("u-rword")
+    conversation.handle_message("u-rword", text="hello")
+    replies = conversation.handle_message(
+        "u-rword", text="do I have to file a police report first?"
+    )
+    assert any("answer[" in r.body for r in replies)
+    assert store.saved == []
+
+
+def test_each_language_phrase_opens_a_report(fake_pipeline, store):
+    for phrase in ("report", "דיווח", "تبليغ"):
+        conversation.reset("u-rlang")
+        conversation.handle_message("u-rlang", text="hello")
+        conversation.handle_message("u-rlang", text=phrase)
+        step = conversation._SESSIONS["u-rlang"].step
+        assert step is conversation.Step.REPORT_CONSENT, f"{phrase!r} did not report"
+
+
+def test_welcome_tells_the_user_how_to_report(fake_pipeline):
+    """Like the restart phrase, it is only discoverable if we name it."""
+    conversation.reset("u-rhint")
+    replies = conversation.handle_message("u-rhint", text="hello")
+    assert TEXTS[Language.ENGLISH].REPORT_HINT.value in replies[0].body
+
+
+@pytest.mark.parametrize(
+    "phrase,language",
+    [("report", Language.ENGLISH), ("דיווח", Language.HEBREW), ("تبليغ", Language.ARABIC)],
+)
+def test_reporting_as_the_very_first_message_reads_in_that_language(
+    fake_pipeline, store, phrase, language
+):
+    """The trigger phrase is language-specific, so it doubles as the sample —
+    the consent message is the one that most needs to be understood."""
+    conversation.reset("u-first")
+    replies = conversation.handle_message("u-first", text=phrase)
+    assert TEXTS[language].REPORT_CONSENT.value in replies[0].body
+
+
+def test_the_report_hint_names_the_phrase_that_actually_works():
+    """The hint is quoted verbatim to the user; a drift here advertises a
+    phrase that does nothing. Mirrors the restart-hint check above."""
+    for texts in TEXTS.values():
+        quoted = texts.REPORT_HINT.value.split('"')[1]
+        assert quoted.strip().lower() in conversation._REPORT_KEYWORDS
+
+
+# --------------------------------------------------------------------------- #
+# Report stores                                                                #
+# --------------------------------------------------------------------------- #
+
+
+def _report_doc(**kw):
+    """A report with a pinned date, so key assertions do not rot next January."""
+    report = build_report(language="he", turns=[{"role": "user", "text": "שלום"}], **kw)
+    report["created_at"] = "2026-09-13T12:00:00+00:00"
+    return report
+
+
+def test_report_path_is_date_partitioned_and_derived_from_the_document():
+    """From created_at, not the clock: a report built a second before midnight
+    and written just after must not land on a day its own contents deny."""
+    report = _report_doc()
+    report["created_at"] = "2026-09-13T23:59:59+00:00"
+    path = report_path(report)
+    assert path.startswith("2026/09/13/")
+    assert path.endswith(f"-{report['report_id']}.json")
+
+
+def test_local_store_writes_readable_utf8_json(tmp_path):
+    """Hebrew and Arabic must survive as letters, not \\uXXXX escapes."""
+    store = LocalReportStore(tmp_path)
+    location = store.save(_report_doc(reason="סיבה"))
+
+    written = Path(location)
+    assert written.parent.parent.parent.parent == tmp_path  # YYYY/MM/DD/
+    assert "שלום" in written.read_text(encoding="utf-8")
+    assert json.loads(written.read_text(encoding="utf-8"))["reason"] == "סיבה"
+
+
+class _StubS3:
+    def __init__(self):
+        self.calls = []
+
+    def put_object(self, **kwargs):
+        self.calls.append(kwargs)
+
+
+def test_s3_store_key_layout_and_body():
+    client = _StubS3()
+    store = S3ReportStore("eilaf-reports", "conversations/", client=client)
+    report = _report_doc()
+    location = store.save(report)
+
+    (call,) = client.calls
+    assert call["Bucket"] == "eilaf-reports"
+    assert call["Key"] == f"conversations/{report_path(report)}"
+    assert call["ContentType"] == "application/json; charset=utf-8"
+    assert json.loads(call["Body"].decode()) == report
+    assert location == f"s3://eilaf-reports/{call['Key']}"
+
+
+@pytest.mark.parametrize("prefix", ["conversations", "conversations/", "/conversations/"])
+def test_s3_prefix_is_normalised(prefix):
+    """Joining a prefix blindly gives "conversations2026/…" or a double slash,
+    each of which reads as a different folder in the console."""
+    client = _StubS3()
+    S3ReportStore("b", prefix, client=client).save(_report_doc())
+    assert client.calls[0]["Key"].startswith("conversations/2026/09/13/")
+
+
+def test_s3_store_with_no_prefix_writes_at_the_root():
+    client = _StubS3()
+    S3ReportStore("b", "", client=client).save(_report_doc())
+    assert client.calls[0]["Key"][:4].isdigit()
+
+
+def test_s3_put_object_params_are_valid_for_the_real_api():
+    """The stub above accepts anything, including a misspelled parameter.
+
+    botocore's Stubber validates the call against the actual S3 service model,
+    so this is the one check that would fail before a deploy rather than on the
+    first real report — and there is no bucket to try it against yet.
+    """
+    import json as _json
+
+    import boto3
+    from botocore.stub import Stubber
+
+    client = boto3.client(
+        "s3",
+        region_name="eu-north-1",
+        aws_access_key_id="test",
+        aws_secret_access_key="test",
+    )
+    report = _report_doc()
+    stubber = Stubber(client)
+    stubber.add_response(
+        "put_object",
+        {"ETag": '"abc"'},
+        {
+            "Bucket": "eilaf-reports",
+            "Key": f"conversations/{report_path(report)}",
+            "Body": _json.dumps(report, ensure_ascii=False, indent=2).encode(),
+            "ContentType": "application/json; charset=utf-8",
+        },
+    )
+    with stubber:
+        location = S3ReportStore("eilaf-reports", "conversations/", client=client).save(
+            report
+        )
+        stubber.assert_no_pending_responses()
+    assert location.startswith("s3://eilaf-reports/conversations/")

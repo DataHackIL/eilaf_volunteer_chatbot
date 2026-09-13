@@ -25,6 +25,7 @@ from app.whatsapp import client, config, conversation, server
 from app.whatsapp.reporting import (
     LocalReportStore,
     S3ReportStore,
+    StoreLogHandler,
     build_report,
     report_path,
 )
@@ -539,7 +540,7 @@ def test_send_failure_carries_the_graph_api_explanation(monkeypatch):
 def test_prod_refuses_to_serve_on_a_rejected_token(monkeypatch):
     """A token Meta rejects must stop the boot, not degrade to a mute bot."""
     monkeypatch.setattr(server, "get_pipeline", lambda: None)
-    monkeypatch.setattr(server.config, "ENV", "prod")
+    monkeypatch.setattr(server.config, "IS_PROD", True)
     monkeypatch.setattr(
         server.client,
         "check_token",
@@ -553,7 +554,7 @@ def test_prod_refuses_to_serve_on_a_rejected_token(monkeypatch):
 def test_dev_serves_on_a_rejected_token(monkeypatch):
     """Outside prod the same token only warns — offline work stays possible."""
     monkeypatch.setattr(server, "get_pipeline", lambda: None)
-    monkeypatch.setattr(server.config, "ENV", "")
+    monkeypatch.setattr(server.config, "IS_PROD", False)
     monkeypatch.setattr(
         server.client,
         "check_token",
@@ -1011,7 +1012,7 @@ def test_report_path_is_date_partitioned_and_derived_from_the_document():
     report = _report_doc()
     report["created_at"] = "2026-09-13T23:59:59+00:00"
     path = report_path(report)
-    assert path.startswith("2026/09/13/")
+    assert path.startswith("reports/2026/09/13/")
     assert path.endswith(f"-{report['report_id']}.json")
 
 
@@ -1021,7 +1022,7 @@ def test_local_store_writes_readable_utf8_json(tmp_path):
     location = store.save(_report_doc(reason="סיבה"))
 
     written = Path(location)
-    assert written.parent.parent.parent.parent == tmp_path  # YYYY/MM/DD/
+    assert written.parent.parent.parent.parent.name == "reports"  # <kind>/YYYY/MM/DD/
     assert "שלום" in written.read_text(encoding="utf-8")
     assert json.loads(written.read_text(encoding="utf-8"))["reason"] == "סיבה"
 
@@ -1054,13 +1055,13 @@ def test_s3_prefix_is_normalised(prefix):
     each of which reads as a different folder in the console."""
     client = _StubS3()
     S3ReportStore("b", prefix, client=client).save(_report_doc())
-    assert client.calls[0]["Key"].startswith("conversations/2026/09/13/")
+    assert client.calls[0]["Key"].startswith("conversations/reports/2026/09/13/")
 
 
 def test_s3_store_with_no_prefix_writes_at_the_root():
     client = _StubS3()
     S3ReportStore("b", "", client=client).save(_report_doc())
-    assert client.calls[0]["Key"][:4].isdigit()
+    assert client.calls[0]["Key"].startswith("reports/2026/")
 
 
 def test_s3_put_object_params_are_valid_for_the_real_api():
@@ -1099,3 +1100,224 @@ def test_s3_put_object_params_are_valid_for_the_real_api():
         )
         stubber.assert_no_pending_responses()
     assert location.startswith("s3://eilaf-reports/conversations/")
+
+
+# --------------------------------------------------------------------------- #
+# EILAF_ENV=dev: every conversation kept, and the user told so up front        #
+# --------------------------------------------------------------------------- #
+
+
+@pytest.fixture
+def dev_mode(monkeypatch, store, fake_pipeline):
+    """Turn on dev mode for the conversation layer, with a recording store.
+
+    ``fake_pipeline`` is not optional here even for tests that never look at an
+    answer: without it these drive the real pipeline, loading e5 and reading the
+    corpus off disk.
+    """
+    monkeypatch.setattr(conversation.config, "IS_DEV", True)
+    return store
+
+
+def test_dev_mode_notice_comes_first_in_the_welcome(dev_mode):
+    """Saving starts on this turn, so telling the user later is telling them
+    too late — the notice leads, before the greeting."""
+    conversation.reset("u-dev")
+    replies = conversation.handle_message("u-dev", text="hello")
+    assert replies[0].body.startswith(EnglishText.DEV_NOTICE.value)
+    assert EnglishText.WELCOME.value in replies[0].body
+
+
+def test_no_dev_notice_when_dev_mode_is_off(fake_pipeline, store):
+    conversation.reset("u-nodev")
+    replies = conversation.handle_message("u-nodev", text="hello")
+    assert EnglishText.DEV_NOTICE.value not in replies[0].body
+    assert store.saved == [], "nothing is kept outside dev mode"
+
+
+@pytest.mark.parametrize("language", [Language.HEBREW, Language.ARABIC])
+def test_correcting_the_language_repeats_the_notice(dev_mode, language):
+    """The realistic reason to tap a language button is that you could not read
+    the welcome — which is where the notice was."""
+    conversation.reset("u-devlang")
+    conversation.handle_message("u-devlang", text="hello")
+    replies = conversation.handle_message("u-devlang", button_id=f"lang:{language.value}")
+    assert TEXTS[language].DEV_NOTICE.value in replies[0].body
+
+
+def test_the_notice_is_not_repeated_once_a_question_has_been_asked(dev_mode):
+    conversation.reset("u-devlate")
+    conversation.handle_message("u-devlate", text="hello")
+    conversation.handle_message("u-devlate", text="what am I entitled to?")
+    replies = conversation.handle_message("u-devlate", button_id="lang:he")
+    assert HebrewText.DEV_NOTICE.value not in replies[0].body
+
+
+def test_dev_mode_saves_every_conversation_without_being_asked(dev_mode):
+    conversation.reset("u-devsave")
+    conversation.handle_message("u-devsave", text="hello")
+    conversation.handle_message("u-devsave", text="what am I entitled to?")
+
+    assert len(dev_mode.saved) == 2, "saved after each turn"
+    latest = dev_mode.saved[-1]
+    assert latest["kind"] == "chats"
+    assert any("what am I entitled to?" == t["text"] for t in latest["turns"])
+
+
+def test_dev_saves_overwrite_one_path_per_conversation(dev_mode):
+    """Fixed id and timestamp for the session, so the store keeps one current
+    copy instead of a trail of partial ones."""
+    conversation.reset("u-devpath")
+    for _ in range(4):
+        conversation.handle_message("u-devpath", text="what am I entitled to?")
+
+    paths = {report_path(r) for r in dev_mode.saved}
+    assert len(paths) == 1
+    assert paths.pop().startswith("chats/")
+
+
+def test_a_restart_begins_a_new_dev_object(dev_mode):
+    """A restart is a new conversation, so it must not overwrite the old one."""
+    conversation.reset("u-devrestart")
+    conversation.handle_message("u-devrestart", text="hello")
+    first = report_path(dev_mode.saved[-1])
+    conversation.handle_message("u-devrestart", text="restart")
+    conversation.handle_message("u-devrestart", text="what am I entitled to?")
+
+    assert report_path(dev_mode.saved[-1]) != first
+
+
+def test_the_dev_autosave_never_breaks_a_conversation(
+    fake_pipeline, monkeypatch, caplog
+):
+    """Capture is for us, not the user: a broken bucket must not cost them an
+    answer, or even show them an error."""
+    monkeypatch.setattr(conversation.config, "IS_DEV", True)
+    monkeypatch.setattr(conversation, "get_report_store", lambda: _FakeStore(fail=True))
+    conversation.reset("u-devfail")
+    conversation.handle_message("u-devfail", text="hello")
+    with caplog.at_level(logging.WARNING):
+        replies = conversation.handle_message("u-devfail", text="what am I entitled to?")
+
+    assert "answer[" in replies[0].body
+    assert "bucket on fire" in caplog.text
+
+
+def test_dev_mode_does_not_store_the_phone_number_either(dev_mode):
+    """The autosaved document is the same shape as a report, and the wa_id is
+    just as absent from it."""
+    wa_id = "972501234567"
+    conversation.reset(wa_id)
+    conversation.handle_message(wa_id, text="hello")
+    assert wa_id not in json.dumps(dev_mode.saved[-1], ensure_ascii=False)
+
+
+# --------------------------------------------------------------------------- #
+# Dev-mode log shipping                                                        #
+# --------------------------------------------------------------------------- #
+
+
+class _MemoryStore:
+    """Records put() calls; stands in for S3 or the filesystem."""
+
+    def __init__(self, fail=False):
+        self.puts = []
+        self.fail = fail
+
+    def put(self, path, data, content_type):
+        if self.fail:
+            raise RuntimeError("bucket on fire")
+        self.puts.append((path, data, content_type))
+        return f"mem://{path}"
+
+
+def _handler(store, **kw):
+    handler = StoreLogHandler(store, **kw)
+    handler.setFormatter(logging.Formatter("%(levelname)s %(message)s"))
+    return handler
+
+
+def _record(message, level=logging.INFO):
+    return logging.LogRecord("t", level, __file__, 1, message, None, None)
+
+
+def test_log_handler_uploads_a_chunk_once_the_buffer_fills():
+    store = _MemoryStore()
+    handler = _handler(store, max_records=3, max_seconds=1e9)
+    for i in range(3):
+        handler.emit(_record(f"line {i}"))
+
+    (path, data, content_type) = store.puts[0]
+    assert data.decode() == "INFO line 0\nINFO line 1\nINFO line 2\n"
+    assert content_type == "text/plain; charset=utf-8"
+    assert path.startswith("logs/")
+    assert path.endswith("-00001.log")
+
+
+def test_log_chunks_are_sequenced_within_a_run():
+    """S3 has no append, so each flush is its own object; the names have to
+    sort in the order the lines were written."""
+    store = _MemoryStore()
+    handler = _handler(store, max_records=1, max_seconds=1e9)
+    for i in range(3):
+        handler.emit(_record(f"line {i}"))
+
+    names = [p.rsplit("/", 1)[1] for p, _, _ in store.puts]
+    assert names == sorted(names)
+    assert [n.split("-")[1] for n in names] == ["00001.log", "00002.log", "00003.log"]
+    assert len({n.split("-")[0] for n in names}) == 1, "one run id"
+
+
+def test_closing_the_handler_flushes_the_tail():
+    """logging.shutdown closes handlers at exit, which is what stops the last
+    few lines of a run being lost."""
+    store = _MemoryStore()
+    handler = _handler(store, max_records=1000, max_seconds=1e9)
+    handler.emit(_record("nearly lost"))
+    assert store.puts == []
+
+    handler.close()
+    assert "nearly lost" in store.puts[0][1].decode()
+
+
+def test_a_failing_log_upload_does_not_raise(capsys):
+    """A broken log shipper must not take the service down with it."""
+    handler = _handler(_MemoryStore(fail=True), max_records=1, max_seconds=1e9)
+    handler.emit(_record("hello"))  # must not raise
+    assert "log upload failed" in capsys.readouterr().err
+
+
+def test_the_handler_does_not_re_enter_itself_while_uploading():
+    """boto3 logs while it works. Without the guard those records land in the
+    buffer being drained, and at DEBUG level the flush never ends."""
+    store = _MemoryStore()
+    handler = _handler(store, max_records=1, max_seconds=1e9)
+
+    logged_during_upload = []
+    real_put = store.put
+
+    def chatty_put(path, data, content_type):
+        handler.emit(_record("botocore says hello"))
+        logged_during_upload.append(path)
+        return real_put(path, data, content_type)
+
+    store.put = chatty_put
+    handler.emit(_record("real line"))
+
+    assert len(logged_during_upload) == 1, "the nested emit did not recurse"
+    assert store.puts[0][1].decode() == "INFO real line\n"
+
+
+def test_install_log_handler_is_dev_only(monkeypatch):
+    import app.whatsapp.reporting as reporting
+
+    monkeypatch.setattr(reporting.config, "IS_DEV", False)
+    assert reporting.install_log_handler() is None
+
+    monkeypatch.setattr(reporting.config, "IS_DEV", True)
+    monkeypatch.setattr(reporting, "get_report_store", lambda: _MemoryStore())
+    handler = reporting.install_log_handler()
+    try:
+        assert handler in logging.getLogger().handlers
+    finally:
+        logging.getLogger().removeHandler(handler)

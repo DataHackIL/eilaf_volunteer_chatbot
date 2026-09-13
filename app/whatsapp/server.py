@@ -29,6 +29,7 @@ from starlette.concurrency import run_in_threadpool
 from app.whatsapp import client, config
 from app.whatsapp.conversation import Reply, handle_message
 from app.whatsapp.pipeline_singleton import get_pipeline
+from app.whatsapp.reporting import install_log_handler
 
 # uvicorn configures its own loggers but leaves the ROOT logger bare, so records
 # from this one propagate to a handler-less root: anything below WARNING is
@@ -41,6 +42,12 @@ logging.basicConfig(
     format="%(levelname)s:     %(name)s: %(message)s",
 )
 logger = logging.getLogger("whatsapp")
+
+# Under EILAF_ENV=dev only, a second handler copies the log to the store, so it
+# outlives the container that `--force-recreate` replaces. Installed here rather
+# than in the lifespan so the boot check's own lines are captured too. Returns
+# None in every other mode, and `logging.shutdown` flushes it on the way out.
+_log_handler = install_log_handler()
 
 
 # Warn this far ahead of the access token's expiry. The dashboard's tokens last
@@ -65,7 +72,7 @@ def _check_access_token() -> None:
         return
     if not status.usable:
         message = f"WHATSAPP_ACCESS_TOKEN was rejected by Meta — {status.detail}"
-        if config.ENV == "prod":
+        if config.IS_PROD:
             raise RuntimeError(message + " (refusing to start: replies would fail)")
         logger.error("%s — replies WILL fail", message)
         return
@@ -83,6 +90,18 @@ def _check_access_token() -> None:
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
+    if config.IS_DEV:
+        # Say it plainly at boot: this mode keeps every conversation, and the
+        # only thing telling users is a notice in the welcome message.
+        logger.warning(
+            "EILAF_ENV=dev — every conversation and this log are being saved to %s",
+            config.REPORT_BUCKET or config.REPORT_DIR,
+        )
+        if not config.REPORT_BUCKET:
+            logger.warning(
+                "no EILAF_REPORT_BUCKET set: saving to a local directory, which "
+                "is discarded with the container on the next --force-recreate"
+            )
     # Before the slow model load, so a dead credential is reported in seconds
     # rather than after a minute of warming a pipeline that cannot reply.
     await run_in_threadpool(_check_access_token)
@@ -90,6 +109,9 @@ async def lifespan(_app: FastAPI):
     # loop isn't blocked), not lazily on the first user's message.
     await run_in_threadpool(get_pipeline)
     yield
+    # Uploads the tail of the log that no later record would have pushed out.
+    if _log_handler is not None:
+        await run_in_threadpool(_log_handler.flush)
 
 
 app = FastAPI(title="Eilaf WhatsApp chatbot", lifespan=lifespan)

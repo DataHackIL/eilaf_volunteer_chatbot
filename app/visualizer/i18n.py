@@ -94,6 +94,11 @@ class HebrewText(Enum):
     )
     REPORT_DONE = "הדיווח נשמר. תודה."
     REPORT_FAILED = "שמירת הדיווח נכשלה, ולא נשמר דבר. אפשר לנסות שוב מאוחר יותר."
+    # Shown first, and only under EILAF_ENV=dev.
+    DEV_NOTICE = (
+        "הודעה חשובה: זו גרסת בדיקה. כל השיחה נשמרת — כולל כל מה שתכתבו — "
+        "כדי שהצוות יוכל לפתח את השירות."
+    )
 
 
 class ArabicText(Enum):
@@ -151,6 +156,11 @@ class ArabicText(Enum):
     )
     REPORT_DONE = "التبليغ انحفظ. شكراً إلكم."
     REPORT_FAILED = "ما زبط حفظ التبليغ، وما انحفظ إشي. فيكم تجرّبوا بعدين."
+    # Shown first, and only under EILAF_ENV=dev.
+    DEV_NOTICE = (
+        "ملاحظة مهمة: هاي نسخة تجريبية. كل المحادثة بتنحفظ — بما فيها كل اللي "
+        "بتكتبوه — حتى الفريق يقدر يطوّر الخدمة."
+    )
 
 
 class EnglishText(Enum):
@@ -211,6 +221,11 @@ class EnglishText(Enum):
     REPORT_FAILED = (
         "The report could not be saved, and nothing was stored. "
         "You can try again later."
+    )
+    # Shown first, and only under EILAF_ENV=dev.
+    DEV_NOTICE = (
+        "Please note: this is a test version. The whole conversation is saved, "
+        "including everything you write, so the team can develop the service."
     )
 
 

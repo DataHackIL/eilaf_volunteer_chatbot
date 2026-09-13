@@ -169,7 +169,12 @@ makes it fatal instead.
 `EILAF_STATIC_DIR` moves the whole store off `/app/data/static` (an EC2 volume,
 or S3 via a mount) — see the README section of the same name.
 
-### Production mode (`EILAF_ENV`)
+### Deployment mode (`EILAF_ENV`)
+
+Three values: unset (local/offline, nothing tightened and nothing kept), `prod`,
+and `dev`. The value is normalised, so `DEV` and `Prod` work as written.
+
+#### Production mode (`EILAF_ENV=prod`)
 
 `WHATSAPP_APP_SECRET` is what stops anyone but Meta posting to your webhook, and
 the check is *skipped* when the secret is empty — fine offline, an open webhook
@@ -192,6 +197,42 @@ section for why.
 > reuses the old container's environment. Use
 > `docker compose up -d --force-recreate chatbot`.
 
+#### Dev mode (`EILAF_ENV=dev`)
+
+The test deployment. Two things happen that happen nowhere else:
+
+* **Every conversation is saved**, with no report phrase and no Approve button,
+  to `chats/` in the store. It is re-saved after each turn onto the same path,
+  so the copy is current even if the process is killed mid-conversation, and a
+  conversation leaves at most one object behind.
+* **The service's own log is saved**, in chunks, to `logs/`. Container logs
+  otherwise go with the container on the next `--force-recreate`.
+
+The user is told, first thing, before they have typed anything — the welcome
+message leads with a notice in their language saying the conversation is kept.
+Tapping a language button repeats it in the language they chose, since not
+being able to read the welcome is the usual reason to tap one.
+
+```bash
+EILAF_ENV=dev docker compose up -d --force-recreate
+```
+
+Two warnings, and they are not boilerplate:
+
+> **This is not a mode to point real traffic at.** People reach this bot after a
+> violent event. A notice is only informed consent if whoever set `EILAF_ENV`
+> intended it to be read — outside dev mode, nothing is kept without the report
+> flow's explicit Approve.
+
+> **The logs are not redacted.** `server` logs the sender's `wa_id` — their
+> phone number — when a turn fails, so unlike the conversation documents, which
+> never contain it, `logs/` can. That is the trade dev mode makes; `chats/` and
+> `reports/` stay clean either way.
+
+Without `EILAF_REPORT_BUCKET` this still works and writes to `data/reports/`
+locally — useful on a laptop, and the boot log says so. On the box, set the
+bucket, or the capture goes into a container the next deploy throws away.
+
 ### Reported conversations (`EILAF_REPORT_BUCKET`)
 
 A user can ask us to keep their conversation: they type the report phrase
@@ -210,6 +251,16 @@ one the user typed themselves.
 | `EILAF_REPORT_PREFIX` | `conversations/` | Key prefix inside the bucket. |
 | `EILAF_REPORT_REGION` | *(empty)* | Empty lets boto3 resolve it (instance metadata). Set it if the bucket is in another region. |
 | `EILAF_REPORT_DIR` | `data/reports` | Local fallback directory. Dev and tests only. |
+| `EILAF_LOG_PREFIX` | `logs` | Folder for dev-mode log chunks, under the prefix above. |
+
+Everything sits under one prefix, in three folders — so one IAM statement
+covers the lot:
+
+```
+conversations/reports/YYYY/MM/DD/<epoch>-<id>.json   reported conversations
+conversations/chats/YYYY/MM/DD/<epoch>-<id>.json     every conversation (dev mode only)
+conversations/logs/YYYY/MM/DD/<run>-<nnnnn>.log      the service log (dev mode only)
+```
 
 The bucket in use is **`eilaf-dev-chatbot-logs`** (`eu-north-1`, the same region
 as the EC2 instance — so `EILAF_REPORT_REGION` can stay empty there, and boto3

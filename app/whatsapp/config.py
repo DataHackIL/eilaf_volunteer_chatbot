@@ -31,9 +31,21 @@ APP_SECRET = os.environ.get("WHATSAPP_APP_SECRET", "")
 # the boot check can still tell whether the token works, just not for how long.
 APP_ID = os.environ.get("WHATSAPP_APP_ID", "")
 
-# Marks a deployment that is reachable from the internet. Only tightens the
-# checks below — unset (the default) keeps local/offline runs permissive.
-ENV = os.environ.get("EILAF_ENV", "")
+# Which deployment this is. Three values:
+#
+#   ""      (default) local/offline runs. Nothing is tightened, nothing is kept.
+#   "prod"  reachable from the internet. Tightens the checks below.
+#   "dev"   a test deployment. Every conversation and the service's own logs are
+#           saved to the store, and the welcome message says so, in the user's
+#           language, before they have typed anything. NOT for real traffic:
+#           people reach this bot after a violent event, and a notice is only
+#           informed consent if whoever set EILAF_ENV meant it to be read.
+#
+# Normalised, so EILAF_ENV=DEV and EILAF_ENV=Prod behave as written rather than
+# silently landing back on the permissive default.
+ENV = os.environ.get("EILAF_ENV", "").strip().lower()
+IS_PROD = ENV == "prod"
+IS_DEV = ENV == "dev"
 
 # How long a conversation survives without a message before it is dropped and
 # the next message starts fresh. Sessions are in-memory and never shrink on
@@ -60,6 +72,9 @@ REPORT_REGION = os.environ.get("EILAF_REPORT_REGION", "")
 REPORT_DIR = os.environ.get("EILAF_REPORT_DIR", "") or str(
     Path(__file__).resolve().parents[2] / "data" / "reports"
 )
+# Where dev-mode log chunks go, under the same prefix as the conversations they
+# explain — so one bucket prefix, and one IAM statement, covers everything.
+LOG_PREFIX = os.environ.get("EILAF_LOG_PREFIX", "logs")
 
 
 def require(name: str, value: str) -> str:
@@ -78,7 +93,7 @@ def require(name: str, value: str) -> str:
 # import, so a missing secret stops the container before uvicorn binds instead
 # of degrading silently. A botched secret refresh then crash-loops visibly
 # (compose restarts it) rather than serving traffic unauthenticated.
-if ENV == "prod":
+if IS_PROD:
     require("WHATSAPP_APP_SECRET", APP_SECRET)
     # Without a bucket the report store falls back to a directory *inside the
     # container*, which every `docker compose up --force-recreate` deletes. That

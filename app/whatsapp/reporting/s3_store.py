@@ -1,4 +1,4 @@
-"""Report store backed by an S3 bucket — the production destination.
+"""Store backed by an S3 bucket — the production destination.
 
 Credentials are **not** configured here. On the EC2 host boto3 picks up the
 instance role from the metadata service, which is why no AWS key appears in
@@ -13,10 +13,7 @@ that remains true — the two are unrelated.
 
 from __future__ import annotations
 
-import json
-from typing import Any
-
-from app.whatsapp.reporting.base import ReportStore, report_path
+from app.whatsapp.reporting.base import ReportStore
 
 
 class S3ReportStore(ReportStore):
@@ -45,15 +42,9 @@ class S3ReportStore(ReportStore):
             )
         return self._client
 
-    def save(self, report: dict[str, Any]) -> str:
-        key = f"{self.prefix}{report_path(report)}"
+    def put(self, path: str, data: bytes, content_type: str) -> str:
+        key = f"{self.prefix}{path}"
         self.client.put_object(
-            Bucket=self.bucket,
-            Key=key,
-            # ensure_ascii=False keeps Hebrew and Arabic readable in the console
-            # and in anything that reads the object back, rather than storing
-            # every letter as a \uXXXX escape.
-            Body=json.dumps(report, ensure_ascii=False, indent=2).encode(),
-            ContentType="application/json; charset=utf-8",
+            Bucket=self.bucket, Key=key, Body=data, ContentType=content_type
         )
         return f"s3://{self.bucket}/{key}"

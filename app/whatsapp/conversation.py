@@ -44,6 +44,12 @@ What is stored is the conversation as it stood when the phrase arrived, and it
 carries no ``wa_id``: that is the user's phone number, and the consent message
 says it is not saved. See :mod:`app.whatsapp.reporting`.
 
+Under ``EILAF_ENV=dev`` that consent step is skipped, because the conversation
+is kept from the first turn regardless: the welcome leads with a notice saying
+so, in the user's language, and every turn re-saves the conversation to the
+store. This is a test-deployment mode — outside it nothing is kept without the
+Approve tap.
+
 State is in-memory (``_SESSIONS``); it is per-process and resets on restart,
 which is fine for the single-process interim deployment. Swapping it for SQLite
 later is a localized change. ``handle_message`` is synchronous and may call the
@@ -54,6 +60,7 @@ from __future__ import annotations
 
 import logging
 import time
+import uuid
 from collections.abc import Sequence
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
@@ -182,6 +189,13 @@ class Session:
     last_seen: float = field(default_factory=time.monotonic)
     step: Step = Step.WELCOME
     language: Language = DEFAULT_LANGUAGE
+    # Identity for the dev-mode autosave, fixed for the life of the session so
+    # every save of this conversation lands on the same path and overwrites the
+    # last. Unused (and unwritten) outside dev mode.
+    session_id: str = field(default_factory=lambda: uuid.uuid4().hex)
+    started_at: str = field(
+        default_factory=lambda: datetime.now(UTC).isoformat(timespec="seconds")
+    )
     # The opening message, held until the question arrives and prepended to it.
     pending_query: str = ""
     query: str = ""
@@ -281,7 +295,39 @@ def handle_message(
         _record(session, Turn("user", (text or "").strip(), button_id))
         for reply in replies:
             _record(session, Turn("bot", reply.body))
+        _autosave(session)
     return replies
+
+
+def _autosave(session: Session) -> None:
+    """In dev mode only, keep the store's copy of this conversation current.
+
+    Re-saved after every turn rather than flushed when the conversation ends:
+    ``report_id`` and ``created_at`` are fixed for the session, so each save
+    overwrites the same object. That costs one PutObject per turn — nothing
+    beside the retrieval and generation the same turn just did — and in exchange
+    a conversation is captured even when the process is killed mid-session,
+    which an end-of-conversation flush cannot promise.
+
+    A failure here is never the user's problem: dev capture is for us, so it is
+    logged and swallowed rather than surfaced or retried.
+    """
+    if not config.IS_DEV or not session.transcript:
+        return
+    try:
+        get_report_store().save(
+            build_report(
+                kind="chats",
+                language=session.language.value,
+                turns=[asdict(turn) for turn in session.transcript],
+                report_id=session.session_id,
+                created_at=session.started_at,
+            )
+        )
+    except Exception:  # noqa: BLE001 — dev capture must never break a conversation
+        logger.warning(
+            "dev autosave failed for session %s", session.session_id, exc_info=True
+        )
 
 
 def _is_report_step(step: Step | None) -> bool:
@@ -375,16 +421,18 @@ def _handle_welcome(session: Session, text: str | None) -> list[Reply]:
     session.step = Step.QUERY
 
     t = TEXTS[session.language]
-    body = "\n\n".join(
-        (
-            t.WELCOME.value,
-            t.QUERY_PROMPT.value,
-            t.CHANGE_LANGUAGE.value,
-            t.RESTART_HINT.value,
-            t.REPORT_HINT.value,
-        )
-    )
-    return [Reply(body, buttons=_switch_buttons(session.language))]
+    # The dev notice goes first, before anything else has been said: under
+    # EILAF_ENV=dev the conversation is saved from this turn onward, so telling
+    # the user afterwards would be telling them too late.
+    parts = [t.DEV_NOTICE.value] if config.IS_DEV else []
+    parts += [
+        t.WELCOME.value,
+        t.QUERY_PROMPT.value,
+        t.CHANGE_LANGUAGE.value,
+        t.RESTART_HINT.value,
+        t.REPORT_HINT.value,
+    ]
+    return [Reply("\n\n".join(parts), buttons=_switch_buttons(session.language))]
 
 
 def _switch_language(session: Session, code: str) -> list[Reply]:
@@ -397,7 +445,17 @@ def _switch_language(session: Session, code: str) -> list[Reply]:
         # Reached only when the very first message was the keyword itself, so
         # there is no question to collect yet — just move on to asking for one.
         session.step = Step.QUERY
-    return _reprompt(session)
+    replies = _reprompt(session)
+    # Correcting the language is the realistic case for someone who could not
+    # read the welcome — which in dev mode is where the notice was. Repeat it in
+    # the language they just chose, while there is still nothing recorded but
+    # hellos. Once they have asked something they have seen it and moved on.
+    if config.IS_DEV and not session.query and replies:
+        t = TEXTS[session.language]
+        replies[0] = Reply(
+            f"{t.DEV_NOTICE.value}\n\n{replies[0].body}", buttons=replies[0].buttons
+        )
+    return replies
 
 
 def _restart(wa_id: str, session: Session) -> list[Reply]:

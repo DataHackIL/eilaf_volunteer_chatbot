@@ -214,8 +214,14 @@ Tapping a language button repeats it in the language they chose, since not
 being able to read the welcome is the usual reason to tap one.
 
 ```bash
-EILAF_ENV=dev docker compose up -d --force-recreate
+EILAF_ENV=dev docker compose up -d --force-recreate   # locally
+./scripts/deploy.sh --env dev 16.171.9.191            # on the box
 ```
+
+`deploy.sh` defaults to `--env prod`; `--env dev` prints what it is about to do
+and pauses before starting. It also excludes `data/reports/` from its rsync,
+which uses `--delete-after` — without that exclusion a deploy would delete every
+conversation captured on the host, since none of them has a local counterpart.
 
 Two warnings, and they are not boilerplate:
 
@@ -229,9 +235,16 @@ Two warnings, and they are not boilerplate:
 > never contain it, `logs/` can. That is the trade dev mode makes; `chats/` and
 > `reports/` stay clean either way.
 
-Without `EILAF_REPORT_BUCKET` this still works and writes to `data/reports/`
-locally — useful on a laptop, and the boot log says so. On the box, set the
-bucket, or the capture goes into a container the next deploy throws away.
+Without `EILAF_REPORT_BUCKET` this still works and writes to `data/reports/`,
+which is bind-mounted on the host — so the capture survives a deploy and can be
+pulled off with `scp`/`rsync`. That is the stopgap until the bucket is wired up,
+not the destination.
+
+> `EILAF_REPORT_BUCKET` must be set in the **shell** that runs `docker compose`,
+> not only in `.env`. Compose interpolates `${...}` in the `environment:` block
+> from the shell, and an interpolated empty string *overrides* the same key
+> arriving via `env_file`. `deploy.sh` forwards it (reading `.env` when the
+> shell has not set it) for exactly this reason.
 
 ### Reported conversations (`EILAF_REPORT_BUCKET`)
 

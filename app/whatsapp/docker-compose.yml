@@ -63,6 +63,13 @@ services:
       # curation has to persist the corpus and embedding cache back to the host,
       # which is only safe while SKIP_DATA_CURATION is honoured above.
       - ../../data/static:/app/data/static  # corpus + embedding cache, bind-mounted
+      # Where reports (and, under EILAF_ENV=dev, every conversation) land when
+      # no EILAF_REPORT_BUCKET is set. Bind-mounted so they survive the
+      # --force-recreate every deploy does — without this the container's own
+      # filesystem takes them with it, and the save reports success either way.
+      # deploy.sh excludes this path from its rsync --delete for the same
+      # reason. Once a bucket is configured, nothing is written here.
+      - ../../data/reports:/app/data/reports
     restart: unless-stopped
 
   tunnel:

@@ -3,13 +3,14 @@
 #
 #   ./scripts/deploy.sh 16.171.9.191
 #   ./scripts/deploy.sh --bootstrap -i ~/.aws/eilaf-chatbot.pem 16.171.9.191
+#   ./scripts/deploy.sh --env dev 16.171.9.191        # keep every conversation
 #
 # What it does, in order:
 #   1. pre-flight the things that silently break a deploy (missing secret,
 #      missing corpus) *locally*, before touching the remote;
 #   2. rsync the working tree + the two things git does not carry — the
 #      repo-root .env and data/static/ (corpus + embedding cache);
-#   3. rebuild and restart the compose stack with EILAF_ENV=prod;
+#   3. rebuild and restart the compose stack (EILAF_ENV=prod by default);
 #   4. print the tunnel's public URL for the Meta webhook config.
 #
 # The code is rsync'd rather than pulled with git, deliberately: the instance
@@ -27,6 +28,7 @@ BOOTSTRAP=0
 BUILD="--build"
 SKIP_CORPUS=0
 CHECK_TOKEN=1
+DEPLOY_ENV="prod"
 
 usage() {
     # The header block above, minus the shebang and the `set -e` line — so
@@ -38,6 +40,8 @@ Options:
   -i, --key PATH     SSH private key (e.g. ~/.aws/eilaf-chatbot.pem)
   -u, --user USER    SSH user (default: ubuntu; use ec2-user on Amazon Linux)
   -d, --dir PATH     remote directory, relative to $HOME (default: eilaf_volunteer_chatbot)
+  -e, --env MODE     prod (default) or dev. dev keeps EVERY conversation and the
+                     service log; the welcome message tells users so.
       --bootstrap    install docker/compose/git/rsync first (fresh host, once)
       --no-build     restart without rebuilding the image (config-only changes)
       --skip-corpus  don't sync data/static (it is ~47 MB and rarely changes)
@@ -54,6 +58,7 @@ while [ $# -gt 0 ]; do
         -i|--key)      SSH_KEY="$2"; shift 2 ;;
         -u|--user)     SSH_USER="$2"; shift 2 ;;
         -d|--dir)      REMOTE_DIR="$2"; shift 2 ;;
+        -e|--env)      DEPLOY_ENV="$2"; shift 2 ;;
         --bootstrap)   BOOTSTRAP=1; shift ;;
         --no-build)    BUILD=""; shift ;;
         --skip-corpus) SKIP_CORPUS=1; shift ;;
@@ -66,6 +71,21 @@ while [ $# -gt 0 ]; do
 done
 
 [ -n "${HOST:-}" ] || usage 1
+
+case "$DEPLOY_ENV" in
+    prod) ;;
+    dev)
+        # Loud on purpose. This host is reachable from WhatsApp, so "dev" here
+        # means real people's conversations are kept — the welcome message says
+        # so, but only whoever typed this flag can decide that is appropriate.
+        echo "deploy: ***  EILAF_ENV=dev  ***" >&2
+        echo "deploy: every conversation on this host will be saved, plus the" >&2
+        echo "deploy: service log (which contains senders' phone numbers)." >&2
+        echo "deploy: users are told in the welcome message. Ctrl-C to abort." >&2
+        sleep 5
+        ;;
+    *) die "--env must be prod or dev (got '$DEPLOY_ENV')" ;;
+esac
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
@@ -83,6 +103,19 @@ remote() { ssh "${SSH_OPTS[@]}" "$TARGET" "$@"; }
 echo "deploy: pre-flight"
 
 [ -f .env ] || die ".env not found at the repo root — see app/whatsapp/SETUP.md §1.6"
+
+# The shell wins; .env fills in. Only these two are read here — everything else
+# in .env reaches the container through compose's env_file, but these are needed
+# at *interpolation* time (see the launch step for why).
+while IFS='=' read -r key value; do
+    [ -n "${!key:-}" ] || export "$key=$value"
+done < <(grep -E '^EILAF_REPORT_(BUCKET|REGION)=' .env || true)
+
+if [ "$DEPLOY_ENV" = "dev" ] && [ -z "${EILAF_REPORT_BUCKET:-}" ]; then
+    echo "deploy: no EILAF_REPORT_BUCKET — dev capture will be written to" >&2
+    echo "deploy: ~/$REMOTE_DIR/data/reports on the host (bind-mounted, so it" >&2
+    echo "deploy: survives the container) rather than to S3." >&2
+fi
 
 for key in WHATSAPP_ACCESS_TOKEN WHATSAPP_PHONE_NUMBER_ID WHATSAPP_VERIFY_TOKEN WHATSAPP_APP_SECRET; do
     grep -qE "^${key}=.+" .env || die "$key is missing or empty in .env"
@@ -228,6 +261,11 @@ RSYNC_EXCLUDES=(
     # means an empty cache the container is forbidden to populate, so it
     # crash-loops on a model it could have downloaded in a minute.
     --exclude 'docker-compose.override.yml'
+    # Conversations and logs captured on the box under EILAF_ENV=dev. They have
+    # no local counterpart, so without this the --delete-after below would wipe
+    # the very data the mode exists to collect — the same trap data/static is
+    # protected from, with a worse outcome: a corpus can be rebuilt.
+    --exclude 'data/reports/'
 )
 
 RSH="ssh ${SSH_OPTS[*]}"
@@ -261,9 +299,18 @@ remote "rm -f ~/$REMOTE_DIR/app/whatsapp/docker-compose.override.yml"
 # so config.py refuses to import without WHATSAPP_APP_SECRET. --force-recreate
 # because a plain restart reuses the old container's environment, which would
 # silently keep a rotated secret's predecessor.
+#
+# EILAF_REPORT_* are forwarded explicitly rather than left to the repo-root
+# .env: compose interpolates ${...} in the environment: block from the *shell*,
+# and an interpolated empty string OVERRIDES the same key coming from env_file.
+# Setting the bucket in .env alone would therefore silently do nothing.
 
 echo "deploy: building and starting the stack"
-remote "cd ~/$REMOTE_DIR/app/whatsapp && EILAF_ENV=prod docker compose up -d $BUILD --force-recreate"
+remote "cd ~/$REMOTE_DIR/app/whatsapp && \
+    EILAF_ENV=$DEPLOY_ENV \
+    EILAF_REPORT_BUCKET='${EILAF_REPORT_BUCKET:-}' \
+    EILAF_REPORT_REGION='${EILAF_REPORT_REGION:-}' \
+    docker compose up -d $BUILD --force-recreate"
 
 # --- 5. verify + report the webhook URL ------------------------------------
 echo "deploy: waiting for the server"

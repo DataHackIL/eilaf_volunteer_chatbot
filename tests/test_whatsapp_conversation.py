@@ -446,6 +446,66 @@ def test_webhook_ignores_status_callbacks(webhook_client):
     assert sent == []
 
 
+def _inbound(message: dict) -> dict:
+    """A webhook payload carrying one inbound message object."""
+    return {
+        "object": "whatsapp_business_account",
+        "entry": [
+            {"changes": [{"field": "messages", "value": {"messages": [message]}}]}
+        ],
+    }
+
+
+@pytest.mark.parametrize("mtype", ["request_welcome", "system", "reaction"])
+def test_webhook_stays_silent_on_events_the_user_did_not_send(webhook_client, mtype):
+    """The welcome is a reply, never an opening move.
+
+    ``request_welcome`` is the one that was reaching real phones: WhatsApp
+    emits it when the user merely opens the chat thread with no conversation
+    live, so once a session had expired it arrived — and was answered — every
+    few hours, unprompted. It carries no text and no button, which is exactly
+    what a silent first contact looks like to the state machine.
+    """
+    wa = "972500000001"
+    client, sent = webhook_client
+    conversation.reset(wa)
+    resp = client.post("/webhook", json=_inbound({"from": wa, "type": mtype}))
+    assert resp.status_code == 200
+    assert sent == []
+    # And nothing was started on our side either, so the next real message is
+    # still a first contact.
+    assert wa not in conversation._SESSIONS
+
+
+def test_saying_hi_after_one_is_ignored_still_gets_the_welcome(webhook_client):
+    wa = "972500000002"
+    client, sent = webhook_client
+    conversation.reset(wa)
+    client.post("/webhook", json=_inbound({"from": wa, "type": "request_welcome"}))
+    assert sent == []
+    client.post(
+        "/webhook",
+        json=_inbound({"from": wa, "type": "text", "text": {"body": "hi"}}),
+    )
+    assert len(sent) == 1
+    assert EnglishText.WELCOME.value in sent[0][1].body
+
+
+def test_an_unreadable_message_the_user_sent_is_still_answered(webhook_client):
+    """A voice note is not a question we can read, but it *is* the user talking.
+
+    It stays on the answered path (the welcome, in the default language) — only
+    events the user never sent are dropped.
+    """
+    wa = "972500000003"
+    client, sent = webhook_client
+    conversation.reset(wa)
+    resp = client.post("/webhook", json=_inbound({"from": wa, "type": "audio"}))
+    assert resp.status_code == 200
+    assert len(sent) == 1
+    assert HebrewText.WELCOME.value in sent[0][1].body
+
+
 def test_signature_rejected_when_secret_set(monkeypatch):
     monkeypatch.setattr(server, "get_pipeline", lambda: None)
     monkeypatch.setattr(server.config, "APP_SECRET", "s3cret")

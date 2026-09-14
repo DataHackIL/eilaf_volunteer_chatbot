@@ -9,6 +9,10 @@ Two endpoints on ``/webhook``:
   background task so we return ``200`` to Meta immediately — Meta retries on a
   slow/failed response, which would otherwise double-process a turn.
 
+  Only what the user actually sent gets that far: WhatsApp also delivers events
+  nobody typed (see ``_UNPROMPTED_TYPES``), and answering one means greeting a
+  user who never said hello.
+
 Run with ``python -m app.whatsapp.server`` (uvicorn, single worker so the warm
 pipeline is loaded once and shared).
 """
@@ -160,11 +164,39 @@ def _verify_signature(request: Request, raw: bytes) -> None:
         raise HTTPException(status_code=403, detail="bad signature")
 
 
+# Inbound ``messages[].type`` values that are not the user saying anything to
+# us. They arrive in the same array as a typed question, but carry no text and
+# no tapped button — so handing one to the state machine is indistinguishable
+# from a silent first contact, and the bot greets someone who never said hello.
+#
+# ``request_welcome`` is the one that bites. WhatsApp emits it when the user
+# merely *opens* the chat thread while no conversation is live, which — once a
+# session has expired — is every few hours, unprompted. (It is Meta's
+# conversational-components welcome trigger, and can also be switched off in
+# WhatsApp Manager; the bot should not depend on a dashboard toggle for this.)
+# ``system`` is a number-change notice and ``reaction`` is a tap on an old
+# message: neither is a question, and neither is worth a welcome either.
+_UNPROMPTED_TYPES = frozenset({"request_welcome", "system", "reaction"})
+
+
 def _iter_messages(data: dict) -> Iterator[dict]:
-    """Yield each inbound message object; ignores status/delivery callbacks."""
+    """Yield each message the user actually sent.
+
+    Status/delivery callbacks never reach here — they are not in ``messages``
+    at all — and the unprompted event types above are dropped, so the welcome
+    is a reply to the user and never an opening move of our own.
+    """
     for entry in data.get("entry", []):
         for change in entry.get("changes", []):
-            yield from change.get("value", {}).get("messages", [])
+            for message in change.get("value", {}).get("messages", []):
+                mtype = message.get("type", "")
+                if mtype in _UNPROMPTED_TYPES:
+                    # Logged rather than dropped in silence: this line is the
+                    # only record that the event arrived at all, and it names
+                    # the type to look for if something keeps emitting one.
+                    logger.info("ignoring %r: the user sent nothing", mtype)
+                    continue
+                yield message
 
 
 def _extract(message: dict) -> tuple[str | None, str | None]:
@@ -176,6 +208,11 @@ def _extract(message: dict) -> tuple[str | None, str | None]:
         interactive = message.get("interactive", {})
         if interactive.get("type") == "button_reply":
             return None, interactive.get("button_reply", {}).get("id")
+    # A voice note, a photo, a location: the user did send something, so it is
+    # answered (with the welcome, or a re-prompt for the step they are on) —
+    # we just have nothing to read. Logged because a type showing up here
+    # regularly is a hint that it belongs in _UNPROMPTED_TYPES instead.
+    logger.info("message type %r carries no text or button", mtype)
     return None, None
 
 

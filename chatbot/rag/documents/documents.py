@@ -48,6 +48,11 @@ class Document:
     is the immediate structural parent's id (``None`` at the top level, or for
     non-tree docx/pdf/txt chunks). A ``parent_id`` may reference a heading-only
     node that never became a Document — such a parent simply won't resolve.
+
+    ``citations`` are the references the chunk's text is drawn from, as
+    ``{"text", "url"}`` dicts, read from a tree node's ``source`` list (the docx
+    converter fills it from footnotes). Unlike ``source`` — the corpus file the
+    chunk came from — they name something a user can actually look up.
     """
 
     text: str
@@ -55,6 +60,18 @@ class Document:
     meta: dict = field(default_factory=dict)
     id: str = ""
     parent_id: str | None = None
+    citations: list[dict] = field(default_factory=list)
+
+
+def format_citation(citation: dict) -> str:
+    """A citation as one plain-text line: its text, then its link in parentheses.
+
+    The link is left out when the citation's text already is the link, and a
+    citation with only one of the two renders as that one.
+    """
+    text = (citation.get("text") or "").strip()
+    url = (citation.get("url") or "").strip()
+    return f"{text} ({url})" if url and url != text else text or url
 
 
 def _read_pdf(path: Path) -> str:
@@ -189,6 +206,28 @@ def _node_meta(node: dict, parent_meta: dict) -> dict:
     return meta
 
 
+def _add_citations(into: list[dict], citations: list | None) -> None:
+    """Append ``citations`` to ``into``, skipping ones already present."""
+    for citation in citations or ():
+        if isinstance(citation, dict) and citation not in into:
+            into.append(citation)
+
+
+def _covering_citations(cover: list | None, parts: list[dict]) -> list[dict]:
+    """Citations for a chunk spanning several nodes under a common ``cover`` node.
+
+    ``cover``'s own citations stand in for any part's that link to the same URL:
+    the enclosing unit's reference already contains its parts ("סעיף 7" covers
+    "סעיף 7(ד)"), and listing each part would bury the answer's source list.
+    Parts citing elsewhere (a footnote to another page) are still kept.
+    """
+    citations: list[dict] = []
+    _add_citations(citations, cover)
+    urls = {c.get("url") for c in citations if c.get("url")}
+    _add_citations(citations, [c for c in parts if c.get("url") not in urls])
+    return citations
+
+
 def _flatten_json_tree(
     data: dict, source: str, merge_chars: int = 0, max_chars: int = 0
 ) -> list[Document]:
@@ -211,6 +250,12 @@ def _flatten_json_tree(
     rollup: every text-bearing node becomes its own Document (the finer-grained
     substrate the id/parent tests pin). A collapsed subtree carries only its root
     node's metadata, so keep ``merge_chars`` near the embedder's context window.
+
+    A node's ``source`` citations follow its text, and every split piece repeats
+    its node's. A chunk spanning several nodes — a rolled-up subtree, a packed run
+    of leaves — cites the node containing them (the subtree root, the leaves'
+    parent), plus any part's citation that links elsewhere; see
+    :func:`_covering_citations`.
     """
     title = data.get("title", "")
     documents: list[Document] = []
@@ -240,8 +285,22 @@ def _flatten_json_tree(
             parts.extend(subtree_text(child, is_root=False))
         return parts
 
+    def subtree_citations(node: dict) -> list[dict]:
+        """Citations of the nodes :func:`subtree_text` draws text from."""
+        citations: list[dict] = []
+        if node.get("useful", True) and (node.get("text") or "").strip():
+            _add_citations(citations, node.get("source"))
+        for child in node.get("children", []):
+            _add_citations(citations, subtree_citations(child))
+        return citations
+
     def emit(
-        text: str, crumbs: list[str], meta: dict, id: str, parent_id: str | None
+        text: str,
+        crumbs: list[str],
+        meta: dict,
+        id: str,
+        parent_id: str | None,
+        citations: list[dict] | None = None,
     ) -> None:
         """Emit ``text`` as one Document, or several if it exceeds ``max_chars``.
 
@@ -256,6 +315,8 @@ def _flatten_json_tree(
         if not text:
             return
         prefix = _CRUMB.join(crumb for crumb in crumbs if crumb)
+        cited: list[dict] = []
+        _add_citations(cited, citations)
         for index, piece in enumerate(_split_text(text, max_chars)):
             documents.append(
                 Document(
@@ -264,13 +325,25 @@ def _flatten_json_tree(
                     meta=dict(meta),
                     id=id if index == 0 else f"{id}{_PIECE}{index}",
                     parent_id=parent_id,
+                    citations=cited,
                 )
             )
 
-    # kolzchut intro paragraph — top-level content, so no structural parent.
-    emit(data.get("lead", ""), [title], root_meta, id=f"{source}#lead", parent_id=None)
+    # kolzchut intro paragraph — top-level content, so no structural parent. It
+    # cites whatever the root cites (the page), as do packs of top-level nodes.
+    root_source = data.get("source")
+    emit(
+        data.get("lead", ""), [title], root_meta, id=f"{source}#lead", parent_id=None,
+        citations=root_source,
+    )
 
-    def walk(nodes: list, crumbs: list[str], meta: dict, parent_path: tuple[int, ...]) -> None:
+    def walk(
+        nodes: list,
+        crumbs: list[str],
+        meta: dict,
+        parent_path: tuple[int, ...],
+        parent_source: list | None = None,
+    ) -> None:
         # A top-level node's parent is the title/root, which is not a Document —
         # so ``parent_id`` is None there and won't resolve.
         parent_id = node_id(parent_path) if parent_path else None
@@ -278,13 +351,18 @@ def _flatten_json_tree(
         # siblings under *this* parent are ever packed together, so packing never
         # crosses a section boundary; ``pack_id`` is the first buffered leaf's id.
         pack: list[str] = []
+        pack_citations: list[dict] = []
         pack_id: str | None = None
 
         def flush() -> None:
             nonlocal pack_id
             if pack:
-                emit("\n".join(pack), crumbs, meta, pack_id, parent_id)
+                emit(
+                    "\n".join(pack), crumbs, meta, pack_id, parent_id,
+                    _covering_citations(parent_source, pack_citations),
+                )
                 pack.clear()
+                pack_citations.clear()
                 pack_id = None
 
         for index, node in enumerate(nodes):
@@ -304,22 +382,29 @@ def _flatten_json_tree(
                 if pack_id is None:
                     pack_id = node_id(path)
                 pack.append(unit)
+                _add_citations(pack_citations, subtree_citations(node))
                 continue
             flush()  # a non-packable node ends the current bin
             if small:
                 # A small *subtree* (a whole sub-section that fits): roll it up
                 # into one Document instead of one-per-descendant-clause.
-                emit(merged, child_crumbs, node_meta, node_id(path), parent_id)
+                emit(
+                    merged, child_crumbs, node_meta, node_id(path), parent_id,
+                    _covering_citations(node.get("source"), subtree_citations(node)),
+                )
                 continue  # subtree consumed — don't also recurse into it
             # Too big (or rollup off): emit this node's own text, recurse.
             # Skip segments the enrich stage judged useless (headers, stubs,
             # meaningless lines); a missing flag (un-enriched) keeps the node.
             if node.get("useful", True):
-                emit(node.get("text", ""), child_crumbs, node_meta, node_id(path), parent_id)
-            walk(node.get("children", []), child_crumbs, node_meta, path)
+                emit(
+                    node.get("text", ""), child_crumbs, node_meta, node_id(path),
+                    parent_id, node.get("source"),
+                )
+            walk(node.get("children", []), child_crumbs, node_meta, path, node.get("source"))
         flush()  # emit any leaves buffered at the end of the sibling list
 
-    walk(data.get("children", []), [title], root_meta, ())
+    walk(data.get("children", []), [title], root_meta, (), root_source)
     return documents
 
 

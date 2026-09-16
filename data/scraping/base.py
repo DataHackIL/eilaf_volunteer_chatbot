@@ -4,6 +4,17 @@ from pathlib import Path
 from chatbot.rag.pipeline.pipeline import RAW_STATIC_DIR
 
 
+def cite(node: dict, text: str, url: str) -> None:
+    """Set ``node``'s and all its descendants' ``source`` to one citation.
+
+    For sources cited by page, where every section of a page (or chapter) points
+    the user at the same place.
+    """
+    node["source"] = [{"text": text, "url": url}]
+    for child in node.get("children", []):
+        cite(child, text, url)
+
+
 class BaseScraper:
     def __init__(self, target_url: str, static_dir: os.PathLike = RAW_STATIC_DIR):
         self.target_url = target_url

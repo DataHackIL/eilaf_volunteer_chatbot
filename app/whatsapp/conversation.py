@@ -71,6 +71,7 @@ from app.visualizer.i18n import TEXTS, Language
 from app.whatsapp import config
 from app.whatsapp.pipeline_singleton import get_pipeline
 from app.whatsapp.reporting import build_report, get_report_store
+from chatbot.rag.documents import format_citation
 from chatbot.rag.pipeline.pipeline import DEFAULT_CONTEXT_ANCHOR
 
 logger = logging.getLogger("whatsapp.conversation")
@@ -698,9 +699,15 @@ def _run_pipeline(session: Session) -> list[Reply]:
 
 
 def _format_sources(contexts: Sequence) -> str:
-    """Compact, de-duplicated bullet list of the retrieved sources."""
+    """Compact, de-duplicated bullet list of the retrieved passages' citations.
+
+    Citations, not corpus file names: a file name means nothing to the user,
+    while a citation names a page or law they can look up. Passages without
+    citations add nothing, so the list is empty when none of them has one.
+    """
     seen: list[str] = []
     for doc in contexts:
-        if doc.source and doc.source not in seen:
-            seen.append(doc.source)
-    return "\n".join(f"• {src}" for src in seen)
+        for line in map(format_citation, doc.citations):
+            if line and line not in seen:
+                seen.append(line)
+    return "\n".join(f"• {line}" for line in seen)

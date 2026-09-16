@@ -4,7 +4,7 @@ from urllib.parse import unquote, urlsplit
 import requests
 from bs4 import BeautifulSoup, Tag
 
-from data.scraping.base import BaseHTMLScraper
+from data.scraping.base import BaseHTMLScraper, cite
 
 # KolZchut runs one wiki per language, each with its own script path: a
 # /he/<page> article is served by /w/he/api.php (there is no shared /w/api.php).
@@ -44,7 +44,8 @@ class KolZchutScraper(BaseHTMLScraper):
     only KolZchut's own chrome (TOC, edit links, help-service and site-notice
     boxes) is stripped. Output mirrors ``nevo.py``: an indented-JSON tree of
     ``{"heading", "anchor", "level", "text", "children"}`` nodes under a root
-    carrying ``title``/``url``/``type``/``area``/``lead``.
+    carrying ``title``/``url``/``type``/``area``/``lead``. Every node, the root
+    included, cites the page: ``source`` is "כל זכות, <title>" with its URL.
     """
 
     def __init__(self, *args, **kwargs):
@@ -155,6 +156,7 @@ class KolZchutScraper(BaseHTMLScraper):
                 continue
             node = stack[-1][1]
             node["text"] = f'{node["text"]}\n{text}'.strip()
+        cite(root, f"כל זכות, {title}", self.target_url)
         return root
 
     def format(self, content: str) -> str:

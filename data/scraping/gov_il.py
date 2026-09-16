@@ -26,7 +26,7 @@ from urllib.parse import parse_qs, urlsplit
 import requests
 from bs4 import BeautifulSoup, Tag
 
-from data.scraping.base import BaseHTMLScraper
+from data.scraping.base import BaseHTMLScraper, cite
 
 CONTENT_API = (
     "https://openapi-gc.digital.gov.il/pub/cio/govil/rest/contentpage/v1"
@@ -158,6 +158,10 @@ class GovILScraper(BaseHTMLScraper):
     Output mirrors the other scrapers: an indented-JSON tree of
     ``{"heading", "level", "text", "children"}`` nodes under a root carrying
     ``title``/``url``/``type``/``area``/``lead``.
+
+    Nodes cite their chapter's page — gov.il renders each chapter as its own
+    page, at ``?chapterIndex=N`` — as "gov.il, <title>, <chapter>"; the root
+    (and so the lead) cites the page itself.
     """
 
     def __init__(self, *args, track: str = "", **kwargs):
@@ -217,6 +221,8 @@ class GovILScraper(BaseHTMLScraper):
         }
         if self.track:
             root["track"] = self.track
+        page_citation = ", ".join(filter(None, ("gov.il", root["title"])))
+        cite(root, page_citation, self.target_url)
 
         nav = ((chapters[0].get("contentMain") or {}).get("sideNav") or {}).get("tagItems") or []
         for index, payload in enumerate(chapters):
@@ -228,6 +234,17 @@ class GovILScraper(BaseHTMLScraper):
             self._fill_chapter(chapter, payload.get("contentMain") or {})
             _fold_barren_headings(chapter)
             if chapter["text"] or chapter["children"]:
+                index_param = (
+                    parse_qs(urlsplit(nav[index].get("url", "")).query).get("chapterIndex")
+                    if 0 < index < len(nav)
+                    else None
+                )
+                url = (
+                    f"{self.target_url}?chapterIndex={index_param[0]}"
+                    if index_param
+                    else self.target_url
+                )
+                cite(chapter, ", ".join(filter(None, (page_citation, heading))), url)
                 root["children"].append(chapter)
         return root
 

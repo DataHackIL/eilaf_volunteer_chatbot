@@ -46,6 +46,63 @@ def _attach_subclause(marker, text, heading, anchor, path):
     return path + [(kind, node)], node
 
 
+def _clause_ref(marker: str) -> str:
+    """A marker as it appears in a clause reference: '6.' → '6', '3 א.' → '3א'.
+
+    Parenthesised sub-clause markers are kept as they are ('(א)'); markers that
+    aren't numbering at all (definitions, continuations) contribute nothing.
+    """
+    kind = _kind(marker)
+    if kind == "section":
+        return re.sub(r"[\s.．]", "", _SECTION_RE.match(marker).group())
+    if kind in ("letter", "digit"):
+        return marker.strip()
+    return ""
+
+
+def _add_sources(tree: dict, url: str) -> None:
+    """Give every node a ``source`` citing the law and where in it the node sits.
+
+    A clause is cited by its section number followed by each enclosing
+    sub-clause marker, e.g. "חוק זכויות נפגעי עבירה, תשס"א-2001, סעיף 6(א)(1)".
+    Schedules number items, not sections, so an item in a תוספת is cited as
+    "<law>, תוספת שניה, פרט 3". A chapter cites the law and its own title (the
+    reference the loader falls back to for a chunk spanning several of its
+    sections); text outside any section cites its chapter, or the law alone, as
+does the root.
+    Nevo pages have no per-section anchors, so the link is the law's page.
+
+    The parser also yields pseudo-chapters inside schedules — "(בוטלה)", the
+    "(סעיף 7(3) ו-(4))" authority line — so a schedule stays open until the next
+    title that starts a real chapter or schedule.
+    """
+    law = tree.get("title", "")
+    schedule = None
+
+    def cite(*parts: str) -> list[dict]:
+        return [{"text": ", ".join(part for part in (law, *parts) if part), "url": url}]
+
+    def walk(nodes: list, ref: str, place: str, label: str) -> None:
+        for node in nodes:
+            node_ref = ref + _clause_ref(node.get("marker", ""))
+            node["source"] = cite(place, f"{label} {node_ref}" if node_ref else "")
+            walk(node.get("children", []), node_ref, place, label)
+
+    tree["source"] = cite()
+    for node in tree.get("children", []):
+        if node.get("type") != "chapter":
+            walk([node], "", "", "סעיף")
+            continue
+        title = node.get("title", "").strip()
+        if title.startswith("תוספת"):
+            schedule = title
+        elif title.startswith("פרק"):
+            schedule = None
+        place = schedule or title
+        node["source"] = cite(place)
+        walk(node.get("children", []), "", place if schedule else "", "פרט" if schedule else "סעיף")
+
+
 class NevoScraper(BaseHTMLScraper):
     """Base for Nevo legislation scrapers.
 
@@ -53,7 +110,8 @@ class NevoScraper(BaseHTMLScraper):
     into the same nested tree of chapters → sections → sub-clauses. Nodes are
     ``{"marker", "heading", "text", "children"}`` dicts; chapters use
     ``{"type": "chapter", "title", "children"}`` and legislative-history lines
-    are collected on an optional ``"notes"`` list.
+    are collected on an optional ``"notes"`` list. :meth:`format` adds each
+    clause node's ``source`` citation, so both templates cite the same way.
     """
 
     def __init__(self, *args, **kwargs):
@@ -65,8 +123,10 @@ class NevoScraper(BaseHTMLScraper):
         raise NotImplementedError
 
     def format(self, content: str) -> str:
-        """Return the reconstructed hierarchy as indented JSON."""
-        return json.dumps(self.parse(content), ensure_ascii=False, indent=2)
+        """Return the reconstructed hierarchy, with clause citations, as indented JSON."""
+        tree = self.parse(content)
+        _add_sources(tree, self.target_url)
+        return json.dumps(tree, ensure_ascii=False, indent=2)
 
 
 def _marker_of(div: Tag) -> str:

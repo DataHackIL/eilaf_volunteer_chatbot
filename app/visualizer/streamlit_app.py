@@ -171,5 +171,8 @@ if query:
 
     st.subheader(T.SOURCES.value)
     for doc in contexts:
-        st.markdown(f"**{doc.source}**")
+        # Each passage under its citations, linked where a URL is known.
+        for citation in doc.citations:
+            text, url = citation.get("text") or "", citation.get("url") or ""
+            st.markdown(f"**[{text or url}]({url})**" if url else f"**{text}**")
         st.write(doc.text)

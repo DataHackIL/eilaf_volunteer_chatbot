@@ -1,3 +1,3 @@
-from chatbot.rag.documents.documents import Document, load_documents
+from chatbot.rag.documents.documents import Document, format_citation, load_documents
 
-__all__ = ["Document", "load_documents"]
+__all__ = ["Document", "format_citation", "load_documents"]

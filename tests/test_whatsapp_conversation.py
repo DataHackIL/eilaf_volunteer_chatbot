@@ -50,7 +50,14 @@ class _FakePipeline:
 
     def retrieve(self, query, facts=None, context=None, **kwargs):
         self.retrieve_calls.append({"query": query, "facts": facts, "context": context})
-        return [Document(text="clause", source="benefits.json", id="benefits.json#0")]
+        return [
+            Document(
+                text="clause",
+                source="benefits.json",
+                id="benefits.json#0",
+                citations=[{"text": "Benefits guide", "url": "https://example.org/benefits"}],
+            )
+        ]
 
 
 @pytest.fixture
@@ -82,7 +89,9 @@ def test_a_question_is_answered_on_the_turn_it_arrives(fake_pipeline):
     # The question is answered immediately — no event/gender/age turns.
     replies = conversation.handle_message(wa, text="What am I entitled to?")
     assert "answer[English]" in replies[0].body
-    assert "benefits.json" in replies[0].body  # sources listed
+    # Sources are the passages' citations, never the corpus file name.
+    assert "• Benefits guide (https://example.org/benefits)" in replies[0].body
+    assert "benefits.json" not in replies[0].body
     assert len(replies) == 2  # answer + follow-up
     # The follow-up offers the one lever that still moves retrieval.
     assert _button_ids(replies[1]) == ["refine"]

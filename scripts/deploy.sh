@@ -352,8 +352,12 @@ if [ "$CHECK_TOKEN" -eq 0 ]; then
           | grep -oE 'https://[a-z0-9-]+\.trycloudflare\.com' | tail -1 || true)
     [ -n "$URL" ] && echo "deploy: (unverified — --no-token-check)"
 else
-    echo "deploy: verifying the tunnel URL"
-    for _ in $(seq 1 30); do
+    # Budget ~3 minutes. A quick tunnel can take well over a minute to finish
+    # registering after it has already announced its hostname, and the 60s this
+    # used to allow expired first — reporting "no working URL" for a tunnel that
+    # came up moments later.
+    echo "deploy: verifying the tunnel URL (up to ~3 min)"
+    for _ in $(seq 1 90); do
         candidates=$(remote "cd ~/$REMOTE_DIR/app/whatsapp && docker compose logs tunnel 2>/dev/null" \
               | grep -oE 'https://[a-z0-9-]+\.trycloudflare\.com' | sort -u || true)
         for candidate in $candidates; do

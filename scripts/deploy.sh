@@ -29,6 +29,7 @@ BUILD="--build"
 SKIP_CORPUS=0
 CHECK_TOKEN=1
 DEPLOY_ENV="prod"
+RECREATE_TUNNEL=0
 
 usage() {
     # The header block above, minus the shebang and the `set -e` line — so
@@ -46,6 +47,9 @@ Options:
       --no-build     restart without rebuilding the image (config-only changes)
       --skip-corpus  don't sync data/static (it is ~47 MB and rarely changes)
       --no-token-check  skip the live Graph API probe (offline deploys)
+      --recreate-tunnel  also recreate the tunnel. Only needed to change tunnel
+                     config — it earns a NEW random trycloudflare hostname, which
+                     must then be re-registered with Meta.
   -h, --help         this message
 USAGE
     exit "${1:-0}"
@@ -63,6 +67,7 @@ while [ $# -gt 0 ]; do
         --no-build)    BUILD=""; shift ;;
         --skip-corpus) SKIP_CORPUS=1; shift ;;
         --no-token-check) CHECK_TOKEN=0; shift ;;
+        --recreate-tunnel) RECREATE_TUNNEL=1; shift ;;
         -h|--help)     usage 0 ;;
         -*)            die "unknown option $1 (try --help)" ;;
         *)             [ -n "${HOST:-}" ] && die "more than one host given"
@@ -309,12 +314,29 @@ remote "rm -f ~/$REMOTE_DIR/app/whatsapp/docker-compose.override.yml"
 # and an interpolated empty string OVERRIDES the same key coming from env_file.
 # Setting the bucket in .env alone would therefore silently do nothing.
 
-echo "deploy: building and starting the stack"
-remote "cd ~/$REMOTE_DIR/app/whatsapp && \
-    EILAF_ENV=$DEPLOY_ENV \
+#
+# Only the chatbot is recreated. The quick tunnel earns a NEW random hostname
+# every time its container is replaced, and Meta goes on reporting the old one
+# as healthy while every message vanishes — so each needless recreate costs a
+# manual re-registration and, until someone does it, a silent bot. The tunnel
+# targets `chatbot:8000` by service name, so Docker's DNS points it at the new
+# container on its own; it never needs to know a deploy happened.
+# --recreate-tunnel when you actually mean to change the tunnel itself.
+
+COMPOSE_ENV="EILAF_ENV=$DEPLOY_ENV \
     EILAF_REPORT_BUCKET='${EILAF_REPORT_BUCKET:-}' \
-    EILAF_REPORT_REGION='${EILAF_REPORT_REGION:-}' \
-    docker compose up -d $BUILD --force-recreate"
+    EILAF_REPORT_REGION='${EILAF_REPORT_REGION:-}'"
+
+if [ "$RECREATE_TUNNEL" -eq 1 ]; then
+    echo "deploy: building and starting the stack (tunnel included)"
+    remote "cd ~/$REMOTE_DIR/app/whatsapp && $COMPOSE_ENV docker compose up -d $BUILD --force-recreate"
+else
+    echo "deploy: building and starting the chatbot (tunnel left running)"
+    remote "cd ~/$REMOTE_DIR/app/whatsapp && $COMPOSE_ENV docker compose up -d $BUILD --force-recreate chatbot"
+    # Creates the tunnel if it is absent (a first deploy), no-op if it is
+    # already up — which is the whole point.
+    remote "cd ~/$REMOTE_DIR/app/whatsapp && $COMPOSE_ENV docker compose up -d tunnel"
+fi
 
 # --- 5. verify + report the webhook URL ------------------------------------
 echo "deploy: waiting for the server"

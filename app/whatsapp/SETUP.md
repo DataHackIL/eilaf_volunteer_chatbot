@@ -262,7 +262,7 @@ one the user typed themselves.
 |---|---|---|
 | `EILAF_REPORT_BUCKET` | *(empty)* | S3 bucket. Empty → the local store below. **Mandatory under `EILAF_ENV=prod`.** |
 | `EILAF_REPORT_PREFIX` | `conversations/` | Key prefix inside the bucket. |
-| `EILAF_REPORT_REGION` | *(empty)* | Empty lets boto3 resolve it (instance metadata). Set it if the bucket is in another region. |
+| `EILAF_REPORT_REGION` | *(empty)* | **Set it.** Empty does *not* mean "use the instance's region" — boto3 lands on `us-east-1`. See below. |
 | `EILAF_REPORT_DIR` | `data/reports` | Local fallback directory. Dev and tests only. |
 | `EILAF_LOG_PREFIX` | `logs` | Folder for dev-mode log chunks, under the prefix above. |
 
@@ -276,15 +276,20 @@ conversations/logs/YYYY/MM/DD/<run>-<nnnnn>.log      the service log (dev mode o
 ```
 
 The bucket in use is **`eilaf-dev-chatbot-logs`** (`eu-north-1`, the same region
-as the EC2 instance — so `EILAF_REPORT_REGION` can stay empty there, and boto3
-resolves the region from instance metadata):
+as the EC2 instance). Set the region explicitly anyway:
 
 ```bash
 EILAF_REPORT_BUCKET=eilaf-dev-chatbot-logs
 ```
 
-Off the instance — a dev machine, where there is no instance metadata — set
-`EILAF_REPORT_REGION=eu-north-1` as well.
+> `EILAF_REPORT_REGION` is **not** optional on the instance, despite the bucket
+> and the box sharing a region. Measured on the box 2026-09-16: with it empty,
+> boto3 inside the container resolved **`us-east-1`**. botocore does not consult
+> instance metadata for the region by default, and S3 falls back to `us-east-1`
+> when nothing else supplies one. Credentials still resolve from the instance
+> role — it is only the region that is wrong, and against a bucket in another
+> region that surfaces as `PermanentRedirect` or `AuthorizationHeaderMalformed`,
+> neither of which points at the real cause.
 
 **Nothing needs to be set up to run locally.** With no bucket, reports are
 written to `data/reports/YYYY/MM/DD/` (gitignored) and the whole flow works

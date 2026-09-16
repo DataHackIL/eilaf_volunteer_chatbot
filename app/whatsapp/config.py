@@ -66,8 +66,12 @@ COLLECT_FACTS = os.environ.get("WHATSAPP_COLLECT_FACTS", "") == "1"
 # No AWS key lives here or in .env: on EC2 boto3 takes the instance role.
 REPORT_BUCKET = os.environ.get("EILAF_REPORT_BUCKET", "")
 REPORT_PREFIX = os.environ.get("EILAF_REPORT_PREFIX", "conversations/")
-# Empty lets boto3 resolve the region itself (instance metadata, ~/.aws/config,
-# AWS_REGION); set it when the bucket is not in the instance's own region.
+# SET THIS. Measured on the box 2026-09-16: left empty, boto3 inside the
+# container resolved us-east-1, not the instance's own region — botocore does
+# not consult instance metadata for the region by default, and S3 falls back to
+# us-east-1 when nothing else says otherwise. The credentials still come from
+# the instance role; only the region is wrong, which fails against a bucket
+# anywhere else as a confusing PermanentRedirect or AuthorizationHeaderMalformed.
 REPORT_REGION = os.environ.get("EILAF_REPORT_REGION", "")
 REPORT_DIR = os.environ.get("EILAF_REPORT_DIR", "") or str(
     Path(__file__).resolve().parents[2] / "data" / "reports"

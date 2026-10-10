@@ -10,7 +10,7 @@ obvious junk is rejected by rule, so only genuinely new segments reach Claude.
 from __future__ import annotations
 
 import copy
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 
 from data.enrich.base import SegmentEnricher
 from data.enrich.rules import is_obvious_junk
@@ -52,7 +52,9 @@ def annotate_tree(
     enricher: SegmentEnricher,
     existing_tree: dict | None = None,
     max_new: int | None = None,
-) -> tuple[dict, int, int]:
+    chunk_size: int | None = None,
+    on_chunk: Callable[[dict], None] | None = None,
+) -> tuple[dict, int, int, int]:
     """Return ``(enriched_copy, n_pending, n_sent, n_annotated)``.
 
     Reuses annotations from ``existing_tree`` and rejects obvious junk by rule;
@@ -66,6 +68,12 @@ def annotate_tree(
     pending, so a later run retries it.
     ``max_new=0`` sends nothing (``enricher`` is never called), which powers the
     dry-run preflight.
+
+    ``chunk_size`` sends the segments to the enricher ``chunk_size`` at a time
+    and calls ``on_chunk(tree)`` after each chunk is applied, so the caller can
+    persist progress: a 7k-segment file is otherwise all-or-nothing, and a
+    crash (or an aborting back-end) late in the run loses every answer already
+    paid for. Each segment is still sent at most once per call.
     """
     tree = copy.deepcopy(raw_tree)
     cache = _existing_annotations(existing_tree)
@@ -86,11 +94,13 @@ def annotate_tree(
     send_nodes = pending_nodes if max_new is None else pending_nodes[:max_new]
     send_texts = pending_texts if max_new is None else pending_texts[:max_new]
     annotated = 0
-    if send_texts:
-        annotations = enricher.enrich(send_texts)
+    step = chunk_size if chunk_size and chunk_size > 0 else max(len(send_texts), 1)
+    for start in range(0, len(send_texts), step):
+        chunk_nodes = send_nodes[start : start + step]
+        annotations = enricher.enrich(send_texts[start : start + step])
         # strict: one annotation per sent segment is the enricher contract;
         # a mismatch would silently skip nodes, so fail loudly instead.
-        for node, annotation in zip(send_nodes, annotations, strict=True):
+        for node, annotation in zip(chunk_nodes, annotations, strict=True):
             # A segment the back-end never answered for (``ok=False``) is left
             # untouched, so it stays pending and a later run retries it. Writing
             # the enricher's defaults would be indistinguishable from a real
@@ -99,5 +109,7 @@ def annotate_tree(
                 continue
             _apply(node, annotation.useful, annotation.tags() or None)
             annotated += 1
+        if on_chunk is not None:
+            on_chunk(tree)
 
     return tree, len(pending_texts), len(send_texts), annotated

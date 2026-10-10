@@ -8,7 +8,10 @@ forever — which is how a retired Gemini model name silently burned a whole run
 
 from __future__ import annotations
 
+import copy
 from collections.abc import Sequence
+
+import pytest
 
 from data.enrich.base import SegmentAnnotation, SegmentEnricher
 from data.enrich.enrich_store import annotate_tree
@@ -89,3 +92,64 @@ def test_ok_is_not_part_of_any_backend_schema():
         '{"useful":true,"min_age":null,"max_age":null,"gender":null,"track":null}'
     )
     assert parsed.ok is True
+
+
+# --- checkpointing ---------------------------------------------------------
+
+def big_tree(n: int) -> dict:
+    return {
+        "title": "T",
+        "children": [
+            {"heading": f"H{i}", "text": f"segment number {i} long enough to pass the rule"}
+            for i in range(n)
+        ],
+    }
+
+
+def test_checkpoint_sends_in_chunks_and_persists_each():
+    enricher = StubEnricher(*[SegmentAnnotation() for _ in range(5)])
+    snapshots: list[int] = []
+
+    def on_chunk(tree):
+        snapshots.append(sum("useful" in node for node in tree["children"]))
+
+    _, pending, sent, annotated = annotate_tree(
+        big_tree(5), enricher, chunk_size=2, on_chunk=on_chunk
+    )
+
+    assert (pending, sent, annotated) == (5, 5, 5)
+    assert snapshots == [2, 4, 5]
+
+
+def test_checkpoint_keeps_earlier_chunks_when_a_later_one_crashes():
+    class CrashOnSecondChunk(StubEnricher):
+        def enrich(self, segments):
+            if self.seen:
+                raise RuntimeError("AccessDenied")
+            return super().enrich(segments)
+
+    enricher = CrashOnSecondChunk(*[SegmentAnnotation() for _ in range(4)])
+    saved: list[dict] = []
+    with pytest.raises(RuntimeError):
+        annotate_tree(
+            big_tree(4), enricher, chunk_size=2, on_chunk=lambda t: saved.append(copy.deepcopy(t))
+        )
+
+    (last,) = saved
+    assert [("useful" in n) for n in last["children"]] == [True, True, False, False]
+    # And the saved copy is a valid "existing" tree: a re-run sends only the rest.
+    retry = StubEnricher(SegmentAnnotation(), SegmentAnnotation())
+    _, pending, sent, _ = annotate_tree(big_tree(4), retry, existing_tree=last)
+    assert (pending, sent) == (2, 2)
+
+
+def test_checkpoint_respects_the_budget_and_sends_each_segment_once():
+    # Failures stay pending but are not re-sent within the same call.
+    enricher = StubEnricher(*[SegmentAnnotation(ok=False) for _ in range(3)])
+    calls: list[int] = []
+    _, pending, sent, annotated = annotate_tree(
+        big_tree(5), enricher, max_new=3, chunk_size=2, on_chunk=lambda t: calls.append(1)
+    )
+    assert (pending, sent, annotated) == (5, 3, 0)
+    assert len(enricher.seen) == len(set(enricher.seen)) == 3
+    assert len(calls) == 2

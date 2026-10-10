@@ -6,6 +6,7 @@ copy so re-runs only bill the LLM for new/changed segments.
 
 Modes / cost control (neither back-end has a built-in spend cap):
   --provider P  which LLM back-end to enrich with: ``claude`` (default),
+                ``bedrock`` (Claude on Amazon Bedrock, EC2 instance role),
                 ``gemini`` (Google AI free tier), or ``cerebras`` (OpenAI-compatible
                 free tier).
   --dry-run     report how many segments would be sent to the LLM; call nothing.
@@ -14,6 +15,9 @@ Modes / cost control (neither back-end has a built-in spend cap):
                 tagged on a later full run.
   --limit N     send at most N new segments to the LLM this run; defer the rest
                 (a later run picks them up), so you can enrich within a budget.
+  --checkpoint N  write each file after every N segments sent, so a crash
+                mid-file keeps what was already annotated (and paid for).
+  --workers N   concurrent requests for the bedrock back-end (default 8).
 """
 
 from __future__ import annotations
@@ -22,6 +26,7 @@ import argparse
 import json
 
 from chatbot.rag.pipeline.pipeline import DEFAULT_STATIC_DIR, RAW_STATIC_DIR
+from data.enrich.bedrock_enricher import BedrockSegmentEnricher
 from data.enrich.claude_enricher import ClaudeSegmentEnricher
 from data.enrich.enrich_store import annotate_tree
 from data.enrich.gemini_enricher import GeminiSegmentEnricher
@@ -30,6 +35,7 @@ from data.enrich.openai_enricher import OpenAICompatibleSegmentEnricher
 # Maps --provider to the enricher class; add a back-end here in one place.
 _ENRICHERS = {
     "claude": ClaudeSegmentEnricher,
+    "bedrock": BedrockSegmentEnricher,
     "gemini": GeminiSegmentEnricher,
     "cerebras": OpenAICompatibleSegmentEnricher,
 }
@@ -41,7 +47,8 @@ def main() -> None:
         "--provider",
         choices=sorted(_ENRICHERS),
         default="claude",
-        help="which LLM back-end to enrich with (claude/gemini/cerebras; default: claude).",
+        help="which LLM back-end to enrich with (claude/bedrock/gemini/cerebras; "
+        "default: claude).",
     )
     parser.add_argument(
         "--dry-run",
@@ -59,6 +66,21 @@ def main() -> None:
         default=None,
         metavar="N",
         help="send at most N new segments to the LLM this run (defer the rest).",
+    )
+    parser.add_argument(
+        "--checkpoint",
+        type=int,
+        default=None,
+        metavar="N",
+        help="write each enriched file after every N segments sent, so a crash "
+        "mid-file keeps the work already done.",
+    )
+    parser.add_argument(
+        "--workers",
+        type=int,
+        default=None,
+        metavar="N",
+        help="concurrent requests (bedrock only; default 8).",
     )
     args = parser.parse_args()
 
@@ -82,7 +104,13 @@ def main() -> None:
         return
 
     enriched_dir.mkdir(parents=True, exist_ok=True)
-    enricher = _ENRICHERS[args.provider]()
+    # Only the bedrock back-end sends concurrently; the others take no workers.
+    enricher_kwargs = {}
+    if args.workers is not None:
+        if args.provider != "bedrock":
+            parser.error("--workers applies only to --provider bedrock")
+        enricher_kwargs["workers"] = args.workers
+    enricher = _ENRICHERS[args.provider](**enricher_kwargs)
     # Only a positive limit drives the stop-early budget; dry-run/no-llm send 0.
     remaining = None if not needs_llm else args.limit
     total_pending = 0
@@ -97,9 +125,19 @@ def main() -> None:
             else None
         )
 
+        def write(tree: dict, out_path=out_path) -> None:
+            out_path.write_text(
+                json.dumps(tree, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
+
         max_new = remaining if needs_llm else 0
         tree, n_pending, sent, annotated = annotate_tree(
-            raw_tree, enricher, existing, max_new=max_new
+            raw_tree,
+            enricher,
+            existing,
+            max_new=max_new,
+            chunk_size=args.checkpoint,
+            on_chunk=write if args.checkpoint else None,
         )
         total_pending += n_pending
 
@@ -107,9 +145,7 @@ def main() -> None:
             print(f"{raw_path.name}: {n_pending} segments would be sent to the LLM")
             continue
 
-        out_path.write_text(
-            json.dumps(tree, ensure_ascii=False, indent=2), encoding="utf-8"
-        )
+        write(tree)
         deferred = n_pending - annotated
         failed = sent - annotated
         if no_llm:

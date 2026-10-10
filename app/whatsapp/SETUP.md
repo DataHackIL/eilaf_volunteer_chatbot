@@ -404,6 +404,22 @@ botocore would silently fall back to `us-east-1`, which for conversations with
 victims of violence means generating answers outside the EU while the config
 says otherwise. Unset, the engine raises on first use and the others keep working.
 
+**Enrichment uses the same grant.** `python -m data.enrich --provider bedrock`
+annotates the corpus with the same region, model id and IAM permissions as the
+answer engine. Pin a cheaper model for it by prefixing that one run with
+`EILAF_BEDROCK_MODEL=…`. Bedrock has no Batches API, so it sends one request per
+segment. Run it on the box from a checkout of the repo:
+
+```bash
+python -m data.enrich --provider bedrock --dry-run          # what would be sent
+python -m data.enrich --provider bedrock --limit 5          # first real calls: check the token read-out
+python -m data.enrich --provider bedrock --checkpoint 200 --workers 8
+```
+
+`--checkpoint` rewrites each enriched file every 200 segments, so a crash late in
+a 6k-segment law keeps what was already paid for. An access or model-id error
+stops the run on its first call rather than deferring every segment.
+
 ### Getting a stable public URL (the tunnel problem)
 
 The default quick tunnel hands you a random `trycloudflare.com` hostname that

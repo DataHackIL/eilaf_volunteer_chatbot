@@ -42,6 +42,57 @@ MODEL_ENV = "EILAF_BEDROCK_MODEL"
 _GEO_BY_REGION_PREFIX = {"eu": "eu", "us": "us"}
 
 
+# Module-level rather than on the head so the enrichment unit's Bedrock back-end
+# (data/enrich/bedrock_enricher.py) resolves region and model by the same rules.
+def resolve_region(override: str | None = None) -> str:
+    """The Bedrock region: ``override``, else ``EILAF_BEDROCK_REGION``.
+
+    Raises rather than letting botocore fall back to ``us-east-1``: the
+    fallback is silent, and these are conversations with victims of
+    violence, so a deployment that believes it is EU-only must fail loudly
+    instead of quietly generating answers across the Atlantic. The report
+    store learned this the hard way — see ``app/whatsapp/config.py``.
+    """
+    region = override or os.environ.get(REGION_ENV, "").strip()
+    if not region:
+        raise RuntimeError(
+            f"{REGION_ENV} is not set, so the Bedrock region is unknown. "
+            "Set it explicitly (e.g. eu-north-1) — it is deliberately not "
+            "defaulted, because botocore would silently fall back to "
+            "us-east-1 and move conversations out of the EU."
+        )
+    return region
+
+
+def resolve_model_id(
+    override: str | None = None,
+    region: str | None = None,
+    base_model: str = MODEL,
+) -> str:
+    """The Bedrock model id: ``override``, else ``EILAF_BEDROCK_MODEL``, else derived.
+
+    ``region`` is a region *override*, resolved only when the id has to be
+    derived — a pinned id needs no region, so it must not demand one.
+
+    The derivation (``eu-north-1`` -> ``eu.anthropic.claude-sonnet-5``) is a
+    default, not a guarantee: confirm against
+    ``aws bedrock list-inference-profiles --region <region>`` and pin
+    ``EILAF_BEDROCK_MODEL`` if the account is served a different id.
+    """
+    pinned = override or os.environ.get(MODEL_ENV, "").strip()
+    if pinned:
+        return pinned
+    region = resolve_region(region)
+    geo = _GEO_BY_REGION_PREFIX.get(region.split("-", 1)[0])
+    if geo is None:
+        raise RuntimeError(
+            f"No inference-profile geography is mapped for region {region!r}. "
+            f"Set {MODEL_ENV} to the id from "
+            f"`aws bedrock list-inference-profiles --region {region}`."
+        )
+    return f"{geo}.anthropic.{base_model}"
+
+
 class BedrockGenerator(ClaudeGenerator):
     """Answer a query from its retrieved contexts using Claude on Bedrock.
 
@@ -69,50 +120,17 @@ class BedrockGenerator(ClaudeGenerator):
 
     @property
     def region(self) -> str:
-        """The Bedrock region, resolved on first access.
-
-        Raises rather than letting botocore fall back to ``us-east-1``: the
-        fallback is silent, and these are conversations with victims of
-        violence, so a deployment that believes it is EU-only must fail loudly
-        instead of quietly generating answers across the Atlantic. The report
-        store learned this the hard way — see ``app/whatsapp/config.py``.
-        """
+        """The Bedrock region, resolved on first access (see :func:`resolve_region`)."""
         if self._region is None:
-            region = self._region_override or os.environ.get(REGION_ENV, "").strip()
-            if not region:
-                raise RuntimeError(
-                    f"{REGION_ENV} is not set, so the Bedrock region is unknown. "
-                    "Set it explicitly (e.g. eu-north-1) — it is deliberately not "
-                    "defaulted, because botocore would silently fall back to "
-                    "us-east-1 and move conversations out of the EU."
-                )
-            self._region = region
+            self._region = resolve_region(self._region_override)
         return self._region
 
     @property
     def model(self) -> str:
         """The Bedrock model id, resolved on first access."""
         if self._model is None:
-            pinned = self._model_override or os.environ.get(MODEL_ENV, "").strip()
-            self._model = pinned or self._derive_model_id(self.region)
+            self._model = resolve_model_id(self._model_override, self._region_override)
         return self._model
-
-    @staticmethod
-    def _derive_model_id(region: str) -> str:
-        """``eu-north-1`` -> ``eu.anthropic.claude-sonnet-5``.
-
-        A default, not a guarantee: confirm against
-        ``aws bedrock list-inference-profiles --region <region>`` and pin
-        ``EILAF_BEDROCK_MODEL`` if the account is served a different id.
-        """
-        geo = _GEO_BY_REGION_PREFIX.get(region.split("-", 1)[0])
-        if geo is None:
-            raise RuntimeError(
-                f"No inference-profile geography is mapped for region {region!r}. "
-                f"Set {MODEL_ENV} to the id from "
-                f"`aws bedrock list-inference-profiles --region {region}`."
-            )
-        return f"{geo}.anthropic.{MODEL}"
 
     def _get_client(self):
         if self._client is None:

@@ -285,3 +285,181 @@ re-encoded before the first answer (≈0.8 s/chunk on CPU for
 `multilingual-e5-base` cuts it sharply). The cache is fingerprinted by corpus
 *and* embedder, so re-running enrichment or swapping the model invalidates it —
 budget an hour the next time you rebuild the corpus.
+
+
+## Track AWS spend
+
+`scripts/aws_costs.py` prints the **actual cost** of the infrastructure per
+service — the current month, the running total to date, and the change since the
+last time you ran it — and shouts if the month is over budget.
+
+```bash
+./scripts/aws_costs.py                     # table + append to the CSV
+./scripts/aws_costs.py --threshold 25      # tighter budget for this run
+./scripts/aws_costs.py --month 2026-08     # look back at a closed month
+./scripts/aws_costs.py --since 2024-01     # widen the to-date window
+./scripts/aws_costs.py --with-credits      # what is billed today instead
+./scripts/aws_costs.py --all --no-write    # zero-cost services too, look only
+```
+
+```
+AWS spend by service (UnblendedCost, USD -- actual cost, credits excluded; whole account)
+                                        2026-10 month-to-date      since 2025-10-01
+Service                                    chatbot      legacy     chatbot      legacy     change
+-------------------------------------------------------------------------------------------------
+Amazon Elastic Compute Cloud - Compute       10.00           -       40.00      120.00       0.00
+Amazon Virtual Private Cloud                  1.00           -        4.00       12.00       0.00
+EC2 - Other                                   1.00           -        4.00       10.00       0.00
+AWS Budgets                                      -        0.10           -        1.00       0.00
+
+nothing in 2026-10 -- to date only         chatbot      legacy   $20.00 in total
+  Amazon Registrar                               -       16.00
+  Tax                                            -        3.00
+  Amazon Simple Storage Service                  -        1.00
+-------------------------------------------------------------------------------------------------
+TOTAL                                        12.00        0.10       48.00      163.00       0.00
+
+Both halves together: 2026-10 $12.10, since 2025-10-01 $211.00.
+```
+
+*(Figures above are illustrative. Real ones live in the git-ignored CSV.)*
+
+
+**Every run splits the cost in two**, so each service is one row rather than the
+same name appearing in two tables for the reader to join. `chatbot` is
+`eu-north-1` from `2026-09`; `legacy` is everything else in scope.
+
+Services that **stopped billing** move to a second block with only the two
+columns that can say anything about them. Most of this account's services are
+dormant history, so keeping them in the main table meant four money columns that
+were mostly blank. A hard zero prints as `-` for the same reason: a column of
+`0.00`s competes with the figures that matter. `--all` adds the services that
+have never cost anything at all.
+
+
+**Every run splits the cost in two**, so each service is one row rather than the
+same name appearing in two tables for the reader to join. `chatbot` is
+`eu-north-1` from `2026-09`; `legacy` is everything else in scope. A hard zero
+prints as `-`, because a column of `0.00`s competes with the figures that matter.
+
+
+**Credits and refunds are excluded**, which on this account is the difference
+between a useful number and a useless one: it runs on a promotional credit
+balance, so every `Usage` line is cancelled by an equal `Credit` line and the
+netted total reads $0.00 while the infrastructure still costs real money. A
+budget alarm on the netted figure would be unreachable until the credits ran dry
+— exactly when it is needed. `--with-credits` asks the other question, what the
+card is charged today; being a look rather than a reading, it records nothing.
+
+Dropping credits is also what makes a service-grouped table honest. AWS files a
+credit against a *different service* than the charge it cancels — here the
+transfer usage books under `EC2 - Other` and its credit under `AWS Data
+Transfer` — so a netted table shows one service as purely positive and another
+as purely negative, neither of which is a thing that happened.
+
+The exclusion works by **dropping record types** (`Credit`, `Refund`) rather than
+allowlisting `Usage` and `Tax`: AWS books real charges under several other types
+too (`DiscountedUsage`, `SavingsPlanCoveredUsage`, `Support`), and an allowlist
+would discard them silently — the one failure mode a cost guard must not have.
+`Discount` records stay for the same reason: a negotiated rate is part of the
+real price, where a promotional credit is a balance draining.
+
+Everything comes from **one** Cost Explorer request — monthly granularity over a
+wide window, so the current month is the last bucket and the to-date total is the
+sum of them all; grouped by `RECORD_TYPE` as well as by service, which is what
+separates the credit records from the charges. Neither the extra column nor the
+second group-by costs anything, which matters because the request is the
+expensive part. It does page when the two group-bys produce more groups than one
+response holds, and each extra page is another $0.01 — a truncated answer being
+worse than a dearer one.
+
+"To date" means the queried window, not the account's whole life: Cost Explorer
+serves **12 months** by default, which is what this asks for. Widen it with
+`--since` if the account is older *and* has historical data enabled.
+
+Each run appends a snapshot to `data/costs/aws_costs.csv` (git-ignored — see
+`.gitignore`) as
+`snapshot,scope,month,service,chatbot_month_usd,legacy_month_usd,`
+`chatbot_to_date_usd,legacy_to_date_usd,delta_usd`. That
+file *is* the "change since" column, and the diff is taken on the **to-date**
+figure rather than the month's — a to-date total only ever grows, so the delta
+stays meaningful across a month boundary instead of resetting to a misleading
+negative on the 1st. A file written by an older column layout is migrated in
+place on the next write, with the actual-cost cells left **blank** on its rows
+rather than back-filled: those figures were netted against credits, and copying
+them across would read as "no credits that month", inventing history. The first
+run after such a migration therefore shows `-` for the change rather than a
+jump the size of the credit balance.
+
+The budget defaults to **$40**, overridable per-run with `--threshold` or
+per-machine with `EILAF_COST_ALERT_USD`. Over it, the script prints a banner to
+stderr and exits **2** (1 = the query failed, 0 = under budget), so a cron job or
+`&&` chain can act on it. The alert fires on the **month**, not on the to-date
+total, deliberately: a lifetime figure crosses any fixed line exactly once and
+then screams forever, whereas a monthly budget re-arms itself. It watches the
+figure the table shows — the actual cost — so it cannot sit silent behind a
+credit balance.
+
+### How the chatbot is told apart from everything else
+
+This AWS account carries workloads older than this project, and they dominate
+the history — most of the twelve-month total is theirs. The split is a
+**region-and-month rule** (`CHATBOT_REGION`, `CHATBOT_SINCE` at the top of the script), which is
+exact here by luck of timing: the chatbot's instance launched 2026-09-12 into
+`eu-north-1`, and the earlier workload in that region had already stopped — by
+the month before the launch it had dwindled to pennies.
+
+The rule is a heuristic, and it is worth knowing where it frays: `global` and
+`NoRegion` costs (a domain, Route 53, tax) always land in `legacy` whether or not
+they serve this project, and a stray $0.01 of RDS in `eu-north-1` falls inside
+the window without being the chatbot's.
+
+For an exact split, tag the resources and filter on the tag:
+
+1. Tag the chatbot's resources — instance, its EBS volume, the reports bucket —
+   with something like `Project=eilaf-chatbot`.
+2. Activate `Project` in **Billing > Cost allocation tags** (takes up to 24 h).
+3. `./scripts/aws_costs.py --tag Project=eilaf-chatbot`
+
+**Tags are not retroactive**: they cover only usage incurred after activation, so
+the region-and-month rule stays the way to read the history. An empty tagged
+result says so rather than implying the resources were free.
+
+`--region` and `--tag` narrow what is counted at all; the chatbot/legacy split
+then applies *within* whatever is left. Each scope keeps its **own** history in
+the CSV's `scope` column, and a snapshot is only ever diffed against its own
+scope — a narrowed reading measured against a whole-account one would otherwise
+look like a huge saving. An explicit `--since` is part of the scope for the same
+reason; the default rolling window is not, so the main series stays continuous.
+
+`--month` only chooses which bucket the per-month column reports; the to-date
+column always runs to now. A back-dated `--month` prints but records nothing, so
+a look backwards can't become the baseline the next run diffs against.
+
+Three caveats, all of them load-bearing:
+
+- **The query costs $0.01.** Cost Explorer bills per `GetCostAndUsage` request
+  and this makes one per run — fine daily (~$0.30/month), absurd every five
+  minutes ($86/month, more than the budget it guards).
+- **Cost Explorer needs a permission the report user lacks by default.** The
+  `eilaf` profile in `~/.aws` is `eilaf-dev-reports`, whose policy otherwise
+  reaches S3 and only S3 (the `conversations/` prefix of the reports bucket, see
+  `app/whatsapp/SETUP.md`). Add a `ce:GetCostAndUsage` statement — the script
+  prints it when denied. Two one-time account settings also gate billing data:
+  Cost Explorer has to be **enabled** (Billing console; first activation takes up
+  to 24 h to backfill), and **IAM access to Billing** has to be on (Account
+  settings), without which an IAM user is denied even holding the action.
+- **The numbers lag.** Cost Explorer refreshes a few times a day, so the current
+  month is always incomplete and is flagged `Estimated`. It is a trend gauge; the
+  bill is the bill.
+
+A **negative** net line is normal, not an error: a credit need not post against
+the service whose charge it cancels. On this account the always-free 100 GB/month
+of outbound transfer shows as an `EC2 - Other` charge and an equal negative `AWS
+Data Transfer` credit, which is why net can show per-service activity and still
+total nothing. Gross keeps the charge and drops the credit, so it does not cancel
+out the same way.
+
+Note `--profile` defaults to `eilaf` (else `$AWS_PROFILE`) because `~/.aws` here
+holds no default profile. Cost Explorer is queried in `us-east-1` regardless of
+`EILAF_REPORT_REGION` — it is a global service with one endpoint.

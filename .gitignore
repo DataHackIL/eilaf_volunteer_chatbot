@@ -47,5 +47,10 @@ data/static/**/.embeddings/
 # never in git.
 data/reports/
 
+# AWS spend snapshots written by scripts/aws_costs.py. Untracked on purpose:
+# it is a running record of what the account is billed, which is nobody's
+# business but ours. Drop this line if you'd rather keep the history in git.
+data/costs/
+
 # Local compose overrides (per-machine dev tweaks, never shared)
 docker-compose.override.yml

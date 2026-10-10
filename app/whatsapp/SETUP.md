@@ -327,6 +327,83 @@ are conversations with victims of violence:
    (`docker compose up -d --force-recreate chatbot` — `config.py` reads the
    environment once at import, so a plain `restart` keeps the old value).
 
+### Bedrock (the `bedrock` answer engine)
+
+The Bedrock head generates answers with the same Claude model as the `claude`
+engine, but on this AWS account — so it needs **no API key**, only the instance
+role plus a region. Three separate things gate it, and all three are easy to
+mistake for each other:
+
+**1. Model access** — Bedrock console → *Model access* → enable the Anthropic
+models. Per-account **and per-region**, and entirely separate from IAM: without
+it `InvokeModel` fails under any policy.
+
+**2. Discovery permissions**, to find out which models and inference-profile ids
+the account is actually served. Neither action supports resource-level scoping,
+so `"Resource": "*"` is correct here:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    { "Effect": "Allow",
+      "Action": ["bedrock:ListFoundationModels", "bedrock:GetFoundationModel",
+                 "bedrock:ListInferenceProfiles", "bedrock:GetInferenceProfile"],
+      "Resource": "*" },
+    { "Effect": "Allow",
+      "Action": ["pricing:DescribeServices", "pricing:GetProducts"],
+      "Resource": "*" }
+  ]
+}
+```
+
+Then read the authoritative ids — do not guess them:
+
+```bash
+aws bedrock list-inference-profiles --region <region> --output table
+aws bedrock list-foundation-models --region <region> \
+  --by-provider anthropic --by-inference-type ON_DEMAND --output table
+```
+
+**3. Invoke permissions** on the instance role (and on whatever principal you
+use locally). Two ARN shapes bite here:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [{
+    "Effect": "Allow",
+    "Action": ["bedrock:InvokeModel", "bedrock:InvokeModelWithResponseStream"],
+    "Resource": [
+      "arn:aws:bedrock:eu-north-1:<ACCOUNT_ID>:inference-profile/eu.anthropic.<MODEL>",
+      "arn:aws:bedrock:eu-north-1::foundation-model/anthropic.<MODEL>",
+      "arn:aws:bedrock:eu-central-1::foundation-model/anthropic.<MODEL>",
+      "arn:aws:bedrock:eu-west-1::foundation-model/anthropic.<MODEL>",
+      "arn:aws:bedrock:eu-west-3::foundation-model/anthropic.<MODEL>"
+    ]
+  }]
+}
+```
+
+- `foundation-model` ARNs carry **no account id** — note the double colon; they
+  are AWS-owned. `inference-profile` ARNs **do** carry it. Swapping the two is
+  the usual cause of a policy that reads correctly and denies everything.
+- A **cross-region inference profile** (`eu.anthropic.…`) needs invoke on the
+  profile *and* on the underlying foundation model in **every region the profile
+  routes to** — hence four regions for one EU profile. Omit them and the denial
+  names a region that appears nowhere in your configuration.
+
+Keep `<ACCOUNT_ID>` as a placeholder in this file: the repo is public, and unlike
+the S3 ARNs above, these carry the account id.
+
+**Region.** Set `EILAF_BEDROCK_REGION` (e.g. `eu-north-1`). It is independent of
+`EILAF_REPORT_REGION` — the bucket and the model need not live together, and
+`eu-north-1` has thinner Claude coverage than Frankfurt or Ireland, so the
+listing above may point you elsewhere. There is deliberately **no default**:
+botocore would silently fall back to `us-east-1`, which for conversations with
+victims of violence means generating answers outside the EU while the config
+says otherwise. Unset, the engine raises on first use and the others keep working.
+
 ### Getting a stable public URL (the tunnel problem)
 
 The default quick tunnel hands you a random `trycloudflare.com` hostname that

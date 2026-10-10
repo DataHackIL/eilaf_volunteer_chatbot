@@ -22,7 +22,9 @@ dependencies = [
     # enrichment / LLM. Both halves ship: data/enrich/* drives the boot-time
     # curation pass, chatbot/rag/generator/* is the live answer head. pydantic
     # for the structured-output schema; dotenv loads the keys from a local .env.
-    "anthropic",
+    # [bedrock] adds only boto3/botocore, which are already base deps below,
+    # so the WhatsApp image does not grow by declaring it.
+    "anthropic[bedrock]",
     # OpenAI-compatible chat endpoints (Cerebras / Groq / OpenRouter free tiers).
     "openai",
     "google-genai>=2.12.1",

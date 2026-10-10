@@ -223,6 +223,23 @@ ANTHROPIC_API_KEY=...  # claude engine
 Keys are resolved lazily, per engine — you only need the one for the engine
 you actually pick, and the default `echo` engine needs none.
 
+The `bedrock` engine is the exception: it runs the same Claude model as
+`claude`, but through Amazon Bedrock on the project's own AWS account, so it
+takes **no API key**. It needs a region instead, and AWS credentials from the
+ambient chain (`AWS_PROFILE` locally, the EC2 instance role in the deployment —
+the same mechanism the report store uses):
+
+```bash
+EILAF_BEDROCK_REGION=eu-north-1   # required; deliberately has no default
+EILAF_BEDROCK_MODEL=...           # optional: pin the inference-profile id
+```
+
+Unset, the engine stays inert and the others are unaffected. The region has no
+default on purpose — botocore would silently fall back to `us-east-1` and
+generate answers outside the EU. See `app/whatsapp/SETUP.md` for the IAM policy
+and the model-access step, both of which are needed before the engine will
+answer.
+
 ### With uv
 
 Run from the repo root (the script path is relative; the corpus dir is resolved

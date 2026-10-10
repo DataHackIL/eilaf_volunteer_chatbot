@@ -109,17 +109,28 @@ echo "deploy: pre-flight"
 
 [ -f .env ] || die ".env not found at the repo root — see app/whatsapp/SETUP.md §1.6"
 
-# The shell wins; .env fills in. Only these two are read here — everything else
-# in .env reaches the container through compose's env_file, but these are needed
-# at *interpolation* time (see the launch step for why).
+# The shell wins; .env fills in. Only these are read here — everything else in
+# .env reaches the container through compose's env_file, but these are needed at
+# *interpolation* time (see the launch step for why). They are also listed in
+# compose's `environment:` block, which OVERRIDES env_file — so one of them left
+# unexported here would blank the value the container would otherwise have read
+# from .env.
 while IFS='=' read -r key value; do
     [ -n "${!key:-}" ] || export "$key=$value"
-done < <(grep -E '^EILAF_REPORT_(BUCKET|REGION)=' .env || true)
+done < <(grep -E '^EILAF_(REPORT_(BUCKET|REGION)|BEDROCK_(REGION|MODEL))=' .env || true)
 
 if [ "$DEPLOY_ENV" = "dev" ] && [ -z "${EILAF_REPORT_BUCKET:-}" ]; then
     echo "deploy: no EILAF_REPORT_BUCKET — dev capture will be written to" >&2
     echo "deploy: ~/$REMOTE_DIR/data/reports on the host (bind-mounted, so it" >&2
     echo "deploy: survives the container) rather than to S3." >&2
+fi
+
+# Opt-in, so this warns rather than dies: the WhatsApp front-end still answers
+# through gemini_rotation(), and the Bedrock head is only reachable once a
+# region is set. Without one it raises on first use instead of guessing a region.
+if [ -z "${EILAF_BEDROCK_REGION:-}" ]; then
+    echo "deploy: no EILAF_BEDROCK_REGION — the Bedrock answer head will be" >&2
+    echo "deploy: inert on the far end (other generators are unaffected)." >&2
 fi
 
 for key in WHATSAPP_ACCESS_TOKEN WHATSAPP_PHONE_NUMBER_ID WHATSAPP_VERIFY_TOKEN WHATSAPP_APP_SECRET; do
@@ -325,7 +336,9 @@ remote "rm -f ~/$REMOTE_DIR/app/whatsapp/docker-compose.override.yml"
 
 COMPOSE_ENV="EILAF_ENV=$DEPLOY_ENV \
     EILAF_REPORT_BUCKET='${EILAF_REPORT_BUCKET:-}' \
-    EILAF_REPORT_REGION='${EILAF_REPORT_REGION:-}'"
+    EILAF_REPORT_REGION='${EILAF_REPORT_REGION:-}' \
+    EILAF_BEDROCK_REGION='${EILAF_BEDROCK_REGION:-}' \
+    EILAF_BEDROCK_MODEL='${EILAF_BEDROCK_MODEL:-}'"
 
 if [ "$RECREATE_TUNNEL" -eq 1 ]; then
     echo "deploy: building and starting the stack (tunnel included)"

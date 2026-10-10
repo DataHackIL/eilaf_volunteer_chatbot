@@ -16,6 +16,7 @@ from dotenv import load_dotenv
 from app.localities import load_localities
 from app.visualizer.i18n import TEXTS, Language
 from chatbot.rag.generator import (
+    BedrockGenerator,
     ClaudeGenerator,
     ContextEchoGenerator,
     Generator,
@@ -66,13 +67,18 @@ def get_pipeline() -> RAGPipeline:
 def get_generators() -> dict[str, Generator]:
     """Selectable answer engines, built once.
 
-    Each LLM head resolves its SDK client and API key lazily on first
-    generation, so constructing all three is cheap and needs no key up front —
-    a key is only required once the user actually picks that engine and asks.
+    Each LLM head resolves its SDK client and credentials lazily on first
+    generation, so constructing them all is cheap and needs nothing up front —
+    a key (or, for Bedrock, a region and AWS credentials) is only required once
+    the user actually picks that engine and asks.
     """
     return {
         "echo": ContextEchoGenerator(),
         "claude": ClaudeGenerator(),
+        # Same model and prompt as "claude", reached through Bedrock on the
+        # project's own AWS account: no API key, and no free-tier quota
+        # ceiling. Needs EILAF_BEDROCK_REGION; inert until it is set.
+        "bedrock": BedrockGenerator(),
         "gemini": gemini_rotation(),  # rotates Gemini models to dodge per-model quotas
         "cerebras": OpenAICompatibleGenerator(),
     }
@@ -108,11 +114,14 @@ sibling_k = st.sidebar.slider(
 )
 
 # Which head phrases the answer from the retrieved passages: "echo" returns them
-# verbatim (no key needed); "claude"/"gemini" generate a grounded Hebrew answer
-# and need the matching key in .env. Retrieval is identical across all three.
+# verbatim (no key needed); the rest generate a grounded Hebrew answer. "claude",
+# "gemini" and "cerebras" need the matching key in .env; "bedrock" runs the same
+# model as "claude" on the project's AWS account, so it needs no key — only
+# EILAF_BEDROCK_REGION. Retrieval is identical across all of them.
 gen_labels = {
     "echo": T.GEN_ECHO.value,
     "claude": T.GEN_CLAUDE.value,
+    "bedrock": T.GEN_BEDROCK.value,
     "gemini": T.GEN_GEMINI.value,
     "cerebras": T.GEN_CEREBRAS.value,
 }

@@ -55,6 +55,18 @@ services:
       # Empty lets boto3 resolve the region itself (instance metadata); set it
       # when the bucket is not in the instance's own region.
       EILAF_REPORT_REGION: "${EILAF_REPORT_REGION:-}"
+      # Which region answers are generated in when the Bedrock head is selected.
+      # Independent of the report region above — the bucket and the model need
+      # not live together. No AWS key here either: the Anthropic Bedrock client
+      # is built with a region only, so botocore takes the EC2 instance role,
+      # which needs bedrock:InvokeModel (see SETUP.md). Unset leaves the head
+      # inert; it deliberately does NOT default to a region, because botocore
+      # would silently pick us-east-1 and move conversations out of the EU.
+      EILAF_BEDROCK_REGION: "${EILAF_BEDROCK_REGION:-}"
+      # Pins the Bedrock model id. Empty derives it from the region (e.g.
+      # eu.anthropic.claude-sonnet-5); set it when the account is served a
+      # different id than `aws bedrock list-inference-profiles` reports.
+      EILAF_BEDROCK_MODEL: "${EILAF_BEDROCK_MODEL:-}"
     ports:
       - "8000:8000"
     volumes:

@@ -66,6 +66,12 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/b7/4c/917d21d6619a4475cdafc6d13a69fdb3b901ddac57e76caca5a25c117b6d/anthropic-0.117.0-py3-none-any.whl", hash = "sha256:451a0a6905f11dff7663d13e4ee5dbf909eb8942b1d049803c7b937a13ac47ec", size = 998327, upload-time = "2026-07-16T19:36:11.225Z" },
 ]
 
+[package.optional-dependencies]
+bedrock = [
+    { name = "boto3" },
+    { name = "botocore" },
+]
+
 [[package]]
 name = "anyio"
 version = "4.14.2"
@@ -569,7 +575,7 @@ name = "eilaf-volunteer-chatbot"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
-    { name = "anthropic" },
+    { name = "anthropic", extra = ["bedrock"] },
     { name = "beautifulsoup4" },
     { name = "boto3" },
     { name = "fastapi" },
@@ -602,7 +608,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "anthropic" },
+    { name = "anthropic", extras = ["bedrock"] },
     { name = "beautifulsoup4" },
     { name = "boto3" },
     { name = "fastapi" },

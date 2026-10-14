@@ -143,7 +143,7 @@ async def receive(request: Request, background: BackgroundTasks) -> Response:
         if not wa_id:
             continue
         text, button_id = _extract(message)
-        background.add_task(_process, wa_id, text, button_id)
+        background.add_task(_process, wa_id, text, button_id, message.get("id"))
     return Response(status_code=200)
 
 
@@ -216,13 +216,30 @@ def _extract(message: dict) -> tuple[str | None, str | None]:
     return None, None
 
 
-def _process(wa_id: str, text: str | None, button_id: str | None) -> None:
+def _process(
+    wa_id: str, text: str | None, button_id: str | None, message_id: str | None = None
+) -> None:
     """Advance the conversation and send the reply/-ies (runs off the request)."""
+    if message_id:
+        _show_typing(message_id)
     try:
         for reply in handle_message(wa_id, text, button_id):
             _send(wa_id, reply)
     except Exception:  # noqa: BLE001 — background task: log, don't crash the worker
         logger.exception("failed handling message from %s", wa_id)
+
+
+def _show_typing(message_id: str) -> None:
+    """Show "typing…" while the answer is worked out; never blocks the reply.
+
+    Answering a question means retrieval plus an LLM call, which can take long
+    enough that a silent chat looks like a dead bot. The indicator is cosmetic,
+    so a failure to show it is logged and the reply goes ahead regardless.
+    """
+    try:
+        client.show_typing(message_id)
+    except Exception:  # noqa: BLE001 — cosmetic; the answer matters more
+        logger.warning("could not show the typing indicator", exc_info=True)
 
 
 def _send(wa_id: str, reply: Reply) -> None:

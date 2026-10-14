@@ -392,6 +392,10 @@ def webhook_client(monkeypatch):
     monkeypatch.setattr(server.config, "APP_SECRET", "")  # skip signature in tests
     sent: list = []
     monkeypatch.setattr(server, "_send", lambda wa_id, reply: sent.append((wa_id, reply)))
+    # The typing indicator lands in the same list, so tests can check ordering.
+    monkeypatch.setattr(
+        server.client, "show_typing", lambda message_id: sent.append(("typing", message_id))
+    )
     with TestClient(server.app) as client:
         yield client, sent
 
@@ -513,6 +517,47 @@ def test_an_unreadable_message_the_user_sent_is_still_answered(webhook_client):
     assert resp.status_code == 200
     assert len(sent) == 1
     assert HebrewText.WELCOME.value in sent[0][1].body
+
+
+def test_typing_indicator_shown_before_the_reply(webhook_client):
+    wa = "972500000004"
+    client, sent = webhook_client
+    conversation.reset(wa)
+    client.post(
+        "/webhook",
+        json=_inbound({"from": wa, "id": "wamid.X", "type": "text", "text": {"body": "hi"}}),
+    )
+    assert sent[0] == ("typing", "wamid.X")
+    assert sent[1][0] == wa
+
+
+def test_typing_indicator_failure_does_not_block_the_reply(webhook_client, monkeypatch):
+    def boom(message_id):
+        raise httpx.HTTPError("graph down")
+
+    monkeypatch.setattr(server.client, "show_typing", boom)
+    wa = "972500000005"
+    client, sent = webhook_client
+    conversation.reset(wa)
+    client.post(
+        "/webhook",
+        json=_inbound({"from": wa, "id": "wamid.Y", "type": "text", "text": {"body": "hi"}}),
+    )
+    assert len(sent) == 1 and sent[0][0] == wa
+
+
+def test_show_typing_payload(monkeypatch):
+    posted: list = []
+    monkeypatch.setattr(client, "_post", posted.append)
+    client.show_typing("wamid.Z")
+    assert posted == [
+        {
+            "messaging_product": "whatsapp",
+            "status": "read",
+            "message_id": "wamid.Z",
+            "typing_indicator": {"type": "text"},
+        }
+    ]
 
 
 def test_signature_rejected_when_secret_set(monkeypatch):

@@ -118,6 +118,23 @@ def send_text(to: str, body: str) -> None:
     )
 
 
+def show_typing(message_id: str) -> None:
+    """Mark inbound ``message_id`` read and show the "typing…" indicator.
+
+    WhatsApp clears the indicator when our next message arrives, or after 25
+    seconds, whichever comes first. Marking the message read (blue ticks) is
+    part of the same call; the API offers no way to show one without the other.
+    """
+    _post(
+        {
+            "messaging_product": "whatsapp",
+            "status": "read",
+            "message_id": message_id,
+            "typing_indicator": {"type": "text"},
+        }
+    )
+
+
 def send_buttons(to: str, body: str, buttons: Sequence[tuple[str, str]]) -> None:
     """Send an interactive reply-buttons message.
 

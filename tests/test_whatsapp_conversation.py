@@ -29,6 +29,7 @@ from app.whatsapp.reporting import (
     build_report,
     report_path,
 )
+from app.whatsapp.users import SQLiteUserStore, user_key
 from chatbot.rag.documents.documents import Document
 
 
@@ -58,6 +59,24 @@ class _FakePipeline:
                 citations=[{"text": "Benefits guide", "url": "https://example.org/benefits"}],
             )
         ]
+
+
+@pytest.fixture(autouse=True)
+def _no_user_store(monkeypatch):
+    """Returning-user recognition off unless a test turns it on.
+
+    The repo ``.env`` may well set ``EILAF_USER_SALT``, and without this every
+    test would read and write the real ``data/users`` database.
+    """
+    monkeypatch.setattr(conversation, "get_user_store", lambda: None)
+
+
+@pytest.fixture
+def user_store(monkeypatch, tmp_path):
+    store = SQLiteUserStore(tmp_path / "users.sqlite")
+    monkeypatch.setattr(conversation, "get_user_store", lambda: store)
+    monkeypatch.setattr(conversation.config, "USER_SALT", "pepper")
+    return store
 
 
 @pytest.fixture
@@ -214,6 +233,72 @@ def test_no_sources_button_when_there_are_none(fake_pipeline, monkeypatch):
     conversation.handle_message(wa, text="hi")
     replies = conversation.handle_message(wa, text="What am I entitled to?")
     assert _button_ids(replies[1]) == ["refine"]
+
+
+def test_a_new_user_gets_the_full_welcome_and_is_remembered(fake_pipeline, user_store):
+    wa = "972500000100"
+    conversation.reset(wa)
+    replies = conversation.handle_message(wa, text="hi")
+    assert EnglishText.WELCOME.value in replies[0].body
+    record = user_store.get(user_key(wa, "pepper"))
+    assert record is not None and record.language == "en"
+
+
+def test_a_returning_user_gets_welcome_back_in_their_language(fake_pipeline, user_store):
+    wa = "972500000101"
+    user_store.touch(user_key(wa, "pepper"), "ar", "2026-10-01")
+    conversation.reset(wa)
+    # Digits carry no script signal, so the remembered language decides.
+    replies = conversation.handle_message(wa, text="123")
+    assert replies[0].body == (
+        f"{ArabicText.WELCOME_BACK.value}\n\n{ArabicText.QUERY_PROMPT.value}"
+    )
+    assert _button_ids(replies[0]) == ["lang:he", "lang:en"]
+
+
+def test_the_message_script_beats_the_remembered_language(fake_pipeline, user_store):
+    wa = "972500000102"
+    key = user_key(wa, "pepper")
+    user_store.touch(key, "ar", "2026-10-01")
+    conversation.reset(wa)
+    replies = conversation.handle_message(wa, text="hello")
+    assert replies[0].body.startswith(EnglishText.WELCOME_BACK.value)
+    record = user_store.get(key)
+    assert record.language == "en"
+    assert record.first_seen == "2026-10-01"  # kept across updates
+
+
+def test_a_language_switch_is_remembered(fake_pipeline, user_store):
+    wa = "972500000103"
+    conversation.reset(wa)
+    conversation.handle_message(wa, text="hi")
+    conversation.handle_message(wa, button_id="lang:he")
+    assert user_store.get(user_key(wa, "pepper")).language == "he"
+
+
+def test_the_record_holds_no_phone_number(fake_pipeline, user_store):
+    wa = "972500000104"
+    conversation.reset(wa)
+    conversation.handle_message(wa, text="hi")
+    assert wa.encode() not in user_store.path.read_bytes()
+
+
+def test_a_broken_user_store_does_not_break_the_conversation(fake_pipeline, monkeypatch):
+    class Broken:
+        def get(self, key):
+            raise OSError("disk gone")
+
+        def touch(self, *args):
+            raise OSError("disk gone")
+
+    monkeypatch.setattr(conversation, "get_user_store", lambda: Broken())
+    monkeypatch.setattr(conversation.config, "USER_SALT", "pepper")
+    wa = "972500000105"
+    conversation.reset(wa)
+    replies = conversation.handle_message(wa, text="hi")
+    assert EnglishText.WELCOME.value in replies[0].body
+    replies = conversation.handle_message(wa, text="What am I entitled to?")
+    assert "answer[English]" in replies[0].body
 
 
 # Pictographs, dingbats, misc symbols, and the variation selector that turns

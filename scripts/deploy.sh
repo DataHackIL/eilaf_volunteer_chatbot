@@ -269,7 +269,7 @@ remote "mkdir -p ~/$REMOTE_DIR"
 # Created here, not by Docker: an absent bind-mount source is created by the
 # daemon as root, leaving captured conversations unreadable to the SSH user
 # without sudo. rsync will not make it either — it is excluded below.
-remote "mkdir -p ~/$REMOTE_DIR/data/reports"
+remote "mkdir -p ~/$REMOTE_DIR/data/reports ~/$REMOTE_DIR/data/users"
 
 RSYNC_EXCLUDES=(
     --exclude '.git/'
@@ -295,6 +295,8 @@ RSYNC_EXCLUDES=(
     # the very data the mode exists to collect — the same trap data/static is
     # protected from, with a worse outcome: a corpus can be rebuilt.
     --exclude 'data/reports/'
+    # Returning-user records, likewise created on the box and nowhere else.
+    --exclude 'data/users/'
 )
 
 RSH="ssh ${SSH_OPTS[*]}"

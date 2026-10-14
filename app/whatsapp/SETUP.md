@@ -355,6 +355,23 @@ are conversations with victims of violence:
    (`docker compose up -d --force-recreate chatbot` — `config.py` reads the
    environment once at import, so a plain `restart` keeps the old value).
 
+### Returning users (`EILAF_USER_SALT`)
+
+Off by default. With it set, the bot remembers that a number has written before,
+and in which language. A returning user gets a short "welcome back" in that
+language instead of the full welcome. Generate the salt once and keep it:
+
+```bash
+echo "EILAF_USER_SALT=$(python3 -c 'import secrets; print(secrets.token_hex(32))')" >> .env
+```
+
+Records are rows in a SQLite file, `data/users/users.sqlite` on the host
+(bind-mounted, and kept out of `deploy.sh`'s rsync). Each row is keyed by
+`HMAC-SHA256(salt, wa_id)`, never by the number itself, and holds only the
+language and the first and last day seen. The salt is a secret: anyone holding
+it can check whether a given number has written to the bot. Changing it makes
+the bot forget everyone.
+
 ### Bedrock (the `bedrock` answer engine)
 
 The Bedrock head generates answers with the same Claude model as the `claude`

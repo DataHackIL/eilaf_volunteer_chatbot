@@ -46,6 +46,7 @@ data/static/**/.embeddings/
 # conversations, kept because a user asked us to — they belong in the bucket,
 # never in git.
 data/reports/
+data/users/
 
 # AWS spend snapshots written by scripts/aws_costs.py. Untracked on purpose:
 # it is a running record of what the account is billed, which is nobody's

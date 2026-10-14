@@ -17,3 +17,9 @@ data/static
 data/raw
 *.ipynb
 .agents
+
+# Written on the deployed host and bind-mounted back in at run time. Never in an
+# image: the build context on the box holds captured conversations and the
+# returning-user records, and a layer would keep them after the host copy is gone.
+data/reports
+data/users

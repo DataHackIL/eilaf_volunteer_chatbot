@@ -81,6 +81,16 @@ REPORT_DIR = os.environ.get("EILAF_REPORT_DIR", "") or str(
 LOG_PREFIX = os.environ.get("EILAF_LOG_PREFIX", "logs")
 
 
+# --- returning users ---------------------------------------------------------
+# Recognising someone who has written before (see ``app/whatsapp/users``). The
+# salt keys each record by HMAC(salt, wa_id) rather than by the phone number;
+# it is a secret, and empty turns the feature off. Rotating it forgets everyone.
+USER_SALT = os.environ.get("EILAF_USER_SALT", "")
+USER_DB = os.environ.get("EILAF_USER_DB", "") or str(
+    Path(__file__).resolve().parents[2] / "data" / "users" / "users.sqlite"
+)
+
+
 def require(name: str, value: str) -> str:
     """Return ``value`` or raise if it's empty — a clear miss-config message."""
     if not value:

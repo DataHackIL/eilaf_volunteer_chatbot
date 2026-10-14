@@ -62,6 +62,10 @@ services:
       # Empty lets boto3 resolve the region itself (instance metadata); set it
       # when the bucket is not in the instance's own region.
       EILAF_REPORT_REGION: "${EILAF_REPORT_REGION:-}"
+      # Returning-user recognition: the HMAC salt is a secret, so it comes from
+      # .env via env_file (not listed here, where an empty shell value would
+      # override it). The database path rarely needs changing.
+      EILAF_USER_DB: "${EILAF_USER_DB:-}"
       # Which region answers are generated in when the Bedrock head is selected.
       # Independent of the report region above — the bucket and the model need
       # not live together. No AWS key here either: the Anthropic Bedrock client
@@ -89,6 +93,11 @@ services:
       # deploy.sh excludes this path from its rsync --delete for the same
       # reason. Once a bucket is configured, nothing is written here.
       - ../../data/reports:/app/data/reports
+      # Returning-user records (app/whatsapp/users): a SQLite file keyed by a
+      # salted hash, never the phone number. Bind-mounted for the same reason
+      # as the reports, and excluded from deploy.sh's rsync --delete likewise.
+      # Unused unless EILAF_USER_SALT is set in .env.
+      - ../../data/users:/app/data/users
     restart: unless-stopped
 
   tunnel:

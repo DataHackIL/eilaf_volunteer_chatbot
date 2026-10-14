@@ -51,6 +51,12 @@ so, in the user's language, and every turn re-saves the conversation to the
 store. This is a test-deployment mode — outside it nothing is kept without the
 Approve tap.
 
+A session is forgotten on expiry or restart, but the user need not be: when
+``EILAF_USER_SALT`` is set, a pseudonymous record (see :mod:`app.whatsapp.users`)
+remembers that they have written before and in which language. A returning user
+gets a short "welcome back" in that language instead of the full welcome; the
+language their message is written in still wins when it has a signal.
+
 State is in-memory (``_SESSIONS``); it is per-process and resets on restart,
 which is fine for the single-process interim deployment. Swapping it for SQLite
 later is a localized change. ``handle_message`` is synchronous and may call the
@@ -72,6 +78,7 @@ from app.visualizer.i18n import TEXTS, Language
 from app.whatsapp import config
 from app.whatsapp.pipeline_singleton import get_pipeline
 from app.whatsapp.reporting import build_report, get_report_store
+from app.whatsapp.users import get_user_store, user_key
 from chatbot.rag.documents import format_citation
 from chatbot.rag.pipeline.pipeline import DEFAULT_CONTEXT_ANCHOR
 
@@ -215,6 +222,13 @@ class Session:
     # latest one's. Bounded by ``_MAX_SOURCES``, oldest dropped first.
     sources: dict[int, str] = field(default_factory=dict)
     answers: int = 0
+    # Returning-user recognition (all inert when it is off). ``user_key`` is the
+    # pseudonymous key, never the wa_id; ``returning`` says a record existed
+    # when the session began; ``stored_language`` is what the record now holds,
+    # None until this session has written it.
+    user_key: str | None = None
+    returning: bool = False
+    stored_language: Language | None = None
 
 
 @dataclass
@@ -303,6 +317,7 @@ def handle_message(
     session = _SESSIONS.get(wa_id)
     if session is None:
         return replies
+    _remember(session)
     was_reporting = session is existing and _is_report_step(before)
     if not (was_reporting or _is_report_step(session.step)):
         _record(session, Turn("user", (text or "").strip(), button_id))
@@ -343,6 +358,49 @@ def _autosave(session: Session) -> None:
         )
 
 
+def _new_session(wa_id: str) -> Session:
+    """A fresh session, seeded from the user's record if they have one."""
+    session = Session()
+    store = get_user_store()
+    if store is None:
+        return session
+    session.user_key = user_key(wa_id, config.USER_SALT)
+    try:
+        record = store.get(session.user_key)
+    except Exception:  # noqa: BLE001 — recognition is a nicety, never a blocker
+        logger.warning("user lookup failed", exc_info=True)
+        return session
+    if record is not None:
+        session.returning = True
+        try:
+            session.language = Language(record.language)
+        except ValueError:  # a language since removed; keep the default
+            pass
+    return session
+
+
+def _remember(session: Session) -> None:
+    """Write the user's record once per session, and again on a language change.
+
+    Not before the language is settled: on the welcome step it is still only a
+    guess from the record, and nothing the user said has confirmed it.
+    """
+    if session.user_key is None or session.step is Step.WELCOME:
+        return
+    if session.stored_language is session.language:
+        return
+    try:
+        get_user_store().touch(
+            session.user_key,
+            session.language.value,
+            datetime.now(UTC).date().isoformat(),
+        )
+    except Exception:  # noqa: BLE001 — as above
+        logger.warning("user record write failed", exc_info=True)
+        return
+    session.stored_language = session.language
+
+
 def _is_report_step(step: Step | None) -> bool:
     return step in (Step.REPORT_CONSENT, Step.REPORT_REASON, Step.REPORT_CONTACT)
 
@@ -368,7 +426,7 @@ def _dispatch(
         del _SESSIONS[wa_id]
         session = None
     if session is None:
-        session = _SESSIONS[wa_id] = Session()
+        session = _SESSIONS[wa_id] = _new_session(wa_id)
     session.last_seen = now
 
     # Restart is handled ahead of the step dispatch, like language below, so it
@@ -432,8 +490,12 @@ def _dispatch(
 
 
 def _handle_welcome(session: Session, text: str | None) -> list[Reply]:
-    """First contact: guess the language, keep the message, ask the question."""
-    session.language = detect_language(text) or DEFAULT_LANGUAGE
+    """First contact: guess the language, keep the message, ask the question.
+
+    ``session.language`` is the default, or a returning user's last language;
+    the message's own script, when it has one, overrides either.
+    """
+    session.language = detect_language(text) or session.language
     session.pending_query = (text or "").strip()
     session.step = Step.QUERY
 
@@ -442,6 +504,10 @@ def _handle_welcome(session: Session, text: str | None) -> list[Reply]:
     # EILAF_ENV=dev the conversation is saved from this turn onward, so telling
     # the user afterwards would be telling them too late.
     parts = [t.DEV_NOTICE.value] if config.IS_DEV else []
+    if session.returning:
+        # They have read the full welcome before; get them to the question.
+        parts += [t.WELCOME_BACK.value, t.QUERY_PROMPT.value]
+        return [Reply("\n\n".join(parts), buttons=_switch_buttons(session.language))]
     parts += [
         t.WELCOME.value,
         t.QUERY_PROMPT.value,
@@ -486,6 +552,10 @@ def _restart(wa_id: str, session: Session) -> list[Reply]:
     reset(wa_id)
     fresh = _SESSIONS[wa_id] = Session()
     fresh.language = language
+    # Same person: keep the key, and that the record already holds this language.
+    fresh.user_key = session.user_key
+    fresh.returning = session.returning
+    fresh.stored_language = session.stored_language
     fresh.step = Step.QUERY  # language is known; nothing to detect
     t = TEXTS[language]
     return [Reply(f"{t.RESTART_DONE.value}\n\n{t.QUERY_PROMPT.value}")]
@@ -534,7 +604,7 @@ def _start_report(session: Session, text: str | None) -> list[Reply]:
         # this, someone whose first message is "report" reads the consent text —
         # the one message that most needs to be understood — in the default
         # language rather than theirs.
-        session.language = detect_language(text) or DEFAULT_LANGUAGE
+        session.language = detect_language(text) or session.language
     session.report = ReportDraft(turns=list(session.transcript))
     session.step = Step.REPORT_CONSENT
     return _reprompt(session)

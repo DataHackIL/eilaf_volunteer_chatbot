@@ -89,12 +89,12 @@ def test_a_question_is_answered_on_the_turn_it_arrives(fake_pipeline):
     # The question is answered immediately — no event/gender/age turns.
     replies = conversation.handle_message(wa, text="What am I entitled to?")
     assert "answer[English]" in replies[0].body
-    # Sources are the passages' citations, never the corpus file name.
-    assert "• Benefits guide (https://example.org/benefits)" in replies[0].body
-    assert "benefits.json" not in replies[0].body
+    # Sources are held back behind a button rather than appended to the answer.
+    assert "Benefits guide" not in replies[0].body
     assert len(replies) == 2  # answer + follow-up
-    # The follow-up offers the one lever that still moves retrieval.
-    assert _button_ids(replies[1]) == ["refine"]
+    # The follow-up offers the one lever that still moves retrieval, and the
+    # sources.
+    assert _button_ids(replies[1]) == ["refine", "sources:1"]
 
     call = fake_pipeline.retrieve_calls[-1]
     # Unconstrained, and on the default anchor: exactly what skipping every
@@ -128,7 +128,7 @@ def test_add_details_re_answers_the_same_question(fake_pipeline):
     assert second["context"] == "תקיפה בבית"  # …new anchor
     assert first["context"] == "נפגע אירוע אלימות"
     # And the answer is re-issued, itself refinable again.
-    assert _button_ids(replies[1]) == ["refine"]
+    assert _button_ids(replies[1]) == ["refine", "sources:2"]
     assert conversation._SESSIONS[wa].step is conversation.Step.QUERY
 
 
@@ -152,6 +152,68 @@ def test_add_details_with_nothing_to_refine_asks_for_a_question(fake_pipeline):
     assert replies[0].body == EnglishText.QUERY_PROMPT.value
 
     assert fake_pipeline.retrieve_calls == []
+
+
+def test_show_sources_on_tap(fake_pipeline):
+    wa = "sources"
+    conversation.reset(wa)
+    conversation.handle_message(wa, text="hi")
+    conversation.handle_message(wa, text="What am I entitled to?")
+
+    replies = conversation.handle_message(wa, button_id="sources:1")
+    assert len(replies) == 1
+    # Sources are the passages' citations, never the corpus file name.
+    assert replies[0].body == (
+        f"{EnglishText.SOURCES.value}:\n• Benefits guide (https://example.org/benefits)"
+    )
+    assert "benefits.json" not in replies[0].body
+    assert conversation._SESSIONS[wa].step is conversation.Step.QUERY
+    assert len(fake_pipeline.retrieve_calls) == 1  # nothing re-run
+
+
+def test_show_sources_on_an_older_answer_shows_its_own(fake_pipeline, monkeypatch):
+    wa = "sources-old"
+    conversation.reset(wa)
+    conversation.handle_message(wa, text="hi")
+    conversation.handle_message(wa, text="first?")
+    monkeypatch.setattr(
+        conversation, "_format_sources", lambda contexts: "• Second source"
+    )
+    conversation.handle_message(wa, text="second?")
+
+    assert "Benefits guide" in conversation.handle_message(wa, button_id="sources:1")[0].body
+    assert "Second source" in conversation.handle_message(wa, button_id="sources:2")[0].body
+
+
+def test_show_sources_after_they_are_gone(fake_pipeline):
+    """A tap from before a restart, or on an id we never issued."""
+    wa = "sources-gone"
+    conversation.reset(wa)
+    conversation.handle_message(wa, text="hi")
+    conversation.handle_message(wa, text="What am I entitled to?")
+    conversation.handle_message(wa, text="restart")
+    for bid in ("sources:1", "sources:x"):
+        replies = conversation.handle_message(wa, button_id=bid)
+        assert replies[0].body == EnglishText.SOURCES_UNAVAILABLE.value
+
+
+def test_sources_kept_for_a_bounded_number_of_answers(fake_pipeline, monkeypatch):
+    monkeypatch.setattr(conversation, "_MAX_SOURCES", 2)
+    wa = "sources-bound"
+    conversation.reset(wa)
+    conversation.handle_message(wa, text="hi")
+    for q in ("a?", "b?", "c?"):
+        conversation.handle_message(wa, text=q)
+    assert sorted(conversation._SESSIONS[wa].sources) == [2, 3]
+
+
+def test_no_sources_button_when_there_are_none(fake_pipeline, monkeypatch):
+    monkeypatch.setattr(conversation, "_format_sources", lambda contexts: "")
+    wa = "sources-none"
+    conversation.reset(wa)
+    conversation.handle_message(wa, text="hi")
+    replies = conversation.handle_message(wa, text="What am I entitled to?")
+    assert _button_ids(replies[1]) == ["refine"]
 
 
 # Pictographs, dingbats, misc symbols, and the variation selector that turns

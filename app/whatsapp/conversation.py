@@ -14,7 +14,8 @@ remain behind ``WHATSAPP_COLLECT_FACTS=1`` for the day an enrichment pass
 populates those tags. The event description *does* move retrieval (it replaces
 ``DEFAULT_CONTEXT_ANCHOR`` in the anchor blend), so it survives as an opt-in:
 every answer offers an **Add details** button which re-runs the same question
-against whatever the user then describes.
+against whatever the user then describes. The answer's sources are not appended
+to it; a **Show sources** button beside Add details sends them on request.
 
 Language is **not** a step. Asking "which language?" costs a whole turn before
 the user can say anything useful, and their opening message already answers it —
@@ -79,6 +80,7 @@ logger = logging.getLogger("whatsapp.conversation")
 # Button ids (echoed back by WhatsApp as interactive ``button_reply.id``).
 _SKIP = "skip"
 _REFINE = "refine"
+_SOURCES_PREFIX = "sources:"
 _LANG_PREFIX = "lang:"
 _GENDER_PREFIX = "gender:"
 _REPORT_APPROVE = "report:approve"
@@ -207,6 +209,12 @@ class Session:
     # the process only if the user asks for that explicitly and approves.
     transcript: list[Turn] = field(default_factory=list)
     report: ReportDraft | None = None
+    # Each answer's formatted sources, keyed by the number its "Show sources"
+    # button carries. Keyed per answer because a button stays tappable in the
+    # chat history: a tap on an older answer must show *its* sources, not the
+    # latest one's. Bounded by ``_MAX_SOURCES``, oldest dropped first.
+    sources: dict[int, str] = field(default_factory=dict)
+    answers: int = 0
 
 
 @dataclass
@@ -232,6 +240,10 @@ _last_sweep: float = 0.0
 # conversation would otherwise grow a process-global list without limit. A
 # report of a conversation this long is already far more than anyone will read.
 _MAX_TURNS = 200
+
+# Answers whose sources stay retrievable. A tap on an older one gets an
+# "unavailable" note instead; nobody scrolls back further than this to ask.
+_MAX_SOURCES = 20
 
 
 def _is_expired(session: Session, now: float) -> bool:
@@ -387,6 +399,10 @@ def _dispatch(
     if button_id == _REFINE and session.query:
         session.step = Step.REFINE
         return _reprompt(session)
+
+    # "Show sources" likewise works from any step and leaves the step alone.
+    if button_id and button_id.startswith(_SOURCES_PREFIX):
+        return _show_sources(session, button_id[len(_SOURCES_PREFIX) :])
 
     if session.step is Step.WELCOME:
         return _handle_welcome(session, text)
@@ -682,9 +698,15 @@ def _run_pipeline(session: Session) -> list[Reply]:
         answer = t.GENERATOR_ERROR.value.format(error=exc)
 
     body = f"{t.ANSWER.value}:\n{answer or t.NO_ANSWER.value}"
+    # Sources are held back behind a button: a citation list under every answer
+    # buries the answer itself, and most users never open one.
+    buttons = [(_REFINE, t.ADD_DETAILS.value)]
     sources = _format_sources(contexts)
     if sources:
-        body += f"\n\n{t.SOURCES.value}:\n{sources}"
+        session.answers += 1
+        session.sources[session.answers] = sources
+        session.sources.pop(session.answers - _MAX_SOURCES, None)
+        buttons.append((f"{_SOURCES_PREFIX}{session.answers}", t.SHOW_SOURCES.value))
 
     # Keep the language, clear the rest, and go back to accepting a question.
     # ``query`` deliberately survives: "Add details" re-answers *this* question.
@@ -694,8 +716,21 @@ def _run_pipeline(session: Session) -> list[Reply]:
     session.facts = {}
     return [
         Reply(body),
-        Reply(t.ASK_ANOTHER.value, buttons=[(_REFINE, t.ADD_DETAILS.value)]),
+        Reply(t.ASK_ANOTHER.value, buttons=buttons),
     ]
+
+
+def _show_sources(session: Session, key: str) -> list[Reply]:
+    """The sources of the answer whose button was tapped, if still held.
+
+    Gone after a restart, an expiry, or ``_MAX_SOURCES`` newer answers; then
+    say so rather than show another answer's sources or nothing at all.
+    """
+    t = TEXTS[session.language]
+    sources = session.sources.get(int(key)) if key.isdigit() else None
+    if sources is None:
+        return [Reply(t.SOURCES_UNAVAILABLE.value)]
+    return [Reply(f"{t.SOURCES.value}:\n{sources}")]
 
 
 def _format_sources(contexts: Sequence) -> str:

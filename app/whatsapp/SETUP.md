@@ -169,6 +169,34 @@ makes it fatal instead.
 `EILAF_STATIC_DIR` moves the whole store off `/app/data/static` (an EC2 volume,
 or S3 via a mount) — see the README section of the same name.
 
+### Pulling the corpus from S3 at boot (`EILAF_CORPUS_S3_URI`)
+
+The corpus is kept in S3 under `s3://eilaf-dev-chatbot-logs/model/data/`
+(`raw/`, `enriched/`, `.embeddings/`). Set this in the repo-root `.env` and the
+entrypoint pulls it into the store before curation and before the server:
+
+```bash
+EILAF_CORPUS_S3_URI=s3://eilaf-dev-chatbot-logs/model/data/
+```
+
+It is a **no-op when the copy on disk already matches**: files are compared by
+content (size, then the S3 ETag), not by timestamp. It only downloads — a local
+file the bucket lacks is kept. A failed pull is logged and the server starts on
+the corpus as mounted. The region falls back to `EILAF_REPORT_REGION`
+(`EILAF_CORPUS_REGION` overrides it); the instance role needs `s3:GetObject` on
+`model/*` and `s3:ListBucket` on the bucket.
+
+With it set, `scripts/deploy.sh` stops rsyncing `data/static` — S3 is the
+source of truth, so push corpus changes there from the dev machine:
+
+```bash
+AWS_PROFILE=eilaf aws s3 sync data/static s3://eilaf-dev-chatbot-logs/model/data/ \
+  --exclude "__init__.py" --exclude "*__pycache__*" --region eu-north-1
+```
+
+Boot-time curation (`SKIP_DATA_CURATION=0`) runs *after* the pull and does not
+upload what it builds; sync that back by hand if it should outlive the box.
+
 ### Deployment mode (`EILAF_ENV`)
 
 Three values: unset (local/offline, nothing tightened and nothing kept), `prod`,

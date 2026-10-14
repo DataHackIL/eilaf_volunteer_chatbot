@@ -201,6 +201,10 @@ embedding cache is a 20 MB `.npy` the pipeline memory-maps at boot and the
 loader re-reads every JSON in the corpus, so per-object latency on a FUSE mount
 lands directly on startup time.
 
+The WhatsApp container does the sync for you: set `EILAF_CORPUS_S3_URI` and it
+pulls the store with `python -m data.corpus_sync` before starting, downloading
+only files whose content differs (see `app/whatsapp/SETUP.md`).
+
 ## Run the Streamlit app
 
 The visualizer (`app/visualizer/streamlit_app.py`) is the chat UI: pick a

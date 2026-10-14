@@ -40,6 +40,13 @@ services:
       # it at another mount (an EC2 volume, or S3 via mountpoint-s3) to move the
       # whole store — raw/, enriched/ and .embeddings/ follow it together.
       EILAF_STATIC_DIR: "${EILAF_STATIC_DIR:-}"
+      # Pull the corpus from S3 into the store above before the server starts,
+      # e.g. s3://eilaf-dev-chatbot-logs/model/data/. Content-compared, so a
+      # boot onto an up-to-date copy downloads nothing. Empty skips the pull.
+      # The instance role needs s3:GetObject on the prefix and s3:ListBucket on
+      # the bucket. Region falls back to EILAF_REPORT_REGION (same bucket).
+      EILAF_CORPUS_S3_URI: "${EILAF_CORPUS_S3_URI:-}"
+      EILAF_CORPUS_REGION: "${EILAF_CORPUS_REGION:-}"
       # "1" restores the old fact-collecting turns (event → gender → age before
       # answering). Off by default: the corpus has almost no age/gender/locality
       # tags, so the answers changed nothing and only delayed the reply.

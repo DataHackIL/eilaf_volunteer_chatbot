@@ -117,7 +117,16 @@ echo "deploy: pre-flight"
 # from .env.
 while IFS='=' read -r key value; do
     [ -n "${!key:-}" ] || export "$key=$value"
-done < <(grep -E '^EILAF_(REPORT_(BUCKET|REGION)|BEDROCK_(REGION|MODEL))=' .env || true)
+done < <(grep -E '^EILAF_(REPORT_(BUCKET|REGION)|BEDROCK_(REGION|MODEL)|CORPUS_(S3_URI|REGION))=' .env || true)
+
+# With a corpus bucket, S3 is the source of truth: the container pulls it at
+# boot and would overwrite whatever we rsync'd. Shipping the local copy too
+# would only make every deploy push it there and back again.
+if [ -n "${EILAF_CORPUS_S3_URI:-}" ] && [ "$SKIP_CORPUS" -eq 0 ]; then
+    echo "deploy: corpus comes from $EILAF_CORPUS_S3_URI — not rsyncing data/static" \
+         "(push changes with: aws s3 sync data/static $EILAF_CORPUS_S3_URI)"
+    SKIP_CORPUS=1
+fi
 
 if [ "$DEPLOY_ENV" = "dev" ] && [ -z "${EILAF_REPORT_BUCKET:-}" ]; then
     echo "deploy: no EILAF_REPORT_BUCKET — dev capture will be written to" >&2
@@ -338,7 +347,9 @@ COMPOSE_ENV="EILAF_ENV=$DEPLOY_ENV \
     EILAF_REPORT_BUCKET='${EILAF_REPORT_BUCKET:-}' \
     EILAF_REPORT_REGION='${EILAF_REPORT_REGION:-}' \
     EILAF_BEDROCK_REGION='${EILAF_BEDROCK_REGION:-}' \
-    EILAF_BEDROCK_MODEL='${EILAF_BEDROCK_MODEL:-}'"
+    EILAF_BEDROCK_MODEL='${EILAF_BEDROCK_MODEL:-}' \
+    EILAF_CORPUS_S3_URI='${EILAF_CORPUS_S3_URI:-}' \
+    EILAF_CORPUS_REGION='${EILAF_CORPUS_REGION:-}'"
 
 if [ "$RECREATE_TUNNEL" -eq 1 ]; then
     echo "deploy: building and starting the stack (tunnel included)"

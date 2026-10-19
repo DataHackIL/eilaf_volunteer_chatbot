@@ -181,7 +181,9 @@ class GeminiSegmentEnricher(SegmentEnricher):
             # so wait and retry the whole rotation (unless we're out of cycles).
             if cycle < self.max_retries - 1:
                 wait = _BACKOFF_SECONDS * (cycle + 1)
-                print(f"  gemini: all {len(self.models)} models exhausted, waiting {wait}s")
+                print(
+                    f"  gemini: all {len(self.models)} models exhausted, waiting {wait}s"
+                )
                 time.sleep(wait)
 
         # Out of cycles: defer rather than bank an un-annotated guess as final.

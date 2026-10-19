@@ -15,15 +15,23 @@ DEFAULT_LANG = "he"
 
 # Chrome / navigation / transient site-notice blocks that are not article
 # content; removed wholesale before the section tree is built.
-_STRIP_SELECTORS = ", ".join((
-    ".mw-editsection",                                # per-heading [edit] links
-    ".toc-box", ".noprint", ".rs_skip",              # table of contents
-    ".kolsherut-links-section", ".help-wrapper-all",  # "help services" callouts
-    ".article-see-also",                             # "ראו גם" link lists
-    ".reference", ".mw-references-wrap",              # footnote markers + reflist
-    "ol.references", "sup.reference",
-    ".mw-empty-elt", "style",
-))
+_STRIP_SELECTORS = ", ".join(
+    (
+        ".mw-editsection",  # per-heading [edit] links
+        ".toc-box",
+        ".noprint",
+        ".rs_skip",  # table of contents
+        ".kolsherut-links-section",
+        ".help-wrapper-all",  # "help services" callouts
+        ".article-see-also",  # "ראו גם" link lists
+        ".reference",
+        ".mw-references-wrap",  # footnote markers + reflist
+        "ol.references",
+        "sup.reference",
+        ".mw-empty-elt",
+        "style",
+    )
+)
 
 # Heading tag -> nesting depth. KolZchut hierarchy lives in these levels, so
 # (unlike nevo.py) no legal-marker inference is needed.
@@ -155,7 +163,7 @@ class KolZchutScraper(BaseHTMLScraper):
             if not text or (is_note and _norm(text) in lead_banners):
                 continue
             node = stack[-1][1]
-            node["text"] = f'{node["text"]}\n{text}'.strip()
+            node["text"] = f"{node['text']}\n{text}".strip()
         cite(root, f"כל זכות, {title}", self.target_url)
         return root
 
@@ -166,5 +174,9 @@ class KolZchutScraper(BaseHTMLScraper):
 
 if __name__ == "__main__":
     # Example usage: a (זכות) rights page and a (חוק) law/portal page.
-    KolZchutScraper("https://www.kolzchut.org.il/he/%D7%93%D7%9E%D7%99_%D7%90%D7%91%D7%98%D7%9C%D7%94")()
-    KolZchutScraper("https://www.kolzchut.org.il/he/%D7%97%D7%95%D7%A7_%D7%94%D7%91%D7%99%D7%98%D7%95%D7%97_%D7%94%D7%9C%D7%90%D7%95%D7%9E%D7%99")()
+    KolZchutScraper(
+        "https://www.kolzchut.org.il/he/%D7%93%D7%9E%D7%99_%D7%90%D7%91%D7%98%D7%9C%D7%94"
+    )()
+    KolZchutScraper(
+        "https://www.kolzchut.org.il/he/%D7%97%D7%95%D7%A7_%D7%94%D7%91%D7%99%D7%98%D7%95%D7%97_%D7%94%D7%9C%D7%90%D7%95%D7%9E%D7%99"
+    )()

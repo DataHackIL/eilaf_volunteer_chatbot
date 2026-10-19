@@ -58,6 +58,7 @@ class _FakeClient:
 
 # --- construction is inert -------------------------------------------------
 
+
 def test_construction_touches_nothing():
     """The Streamlit app builds every head up front; this one must stay cheap."""
     gen = BedrockGenerator()
@@ -73,6 +74,7 @@ def test_empty_contexts_short_circuits_without_any_config():
 
 
 # --- region resolution -----------------------------------------------------
+
 
 def test_missing_region_raises_and_does_not_default():
     gen = BedrockGenerator()
@@ -95,6 +97,7 @@ def test_explicit_region_beats_env(monkeypatch):
 
 
 # --- model id derivation ---------------------------------------------------
+
 
 @pytest.mark.parametrize(
     ("region", "geo"),
@@ -124,6 +127,7 @@ def test_explicit_model_beats_env(monkeypatch):
 
 
 # --- generation reuses the Claude head's behaviour -------------------------
+
 
 def test_generate_sends_the_resolved_model_and_records_usage():
     gen = BedrockGenerator(region="eu-north-1")

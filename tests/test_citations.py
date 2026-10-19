@@ -63,7 +63,9 @@ def test_each_node_keeps_its_own_citations():
 
 def test_rolled_up_subtree_cites_its_root_plus_other_links():
     # A2's citation shares A's URL, so A's covers it; A1's links elsewhere.
-    by_id = {d.id: d for d in _flatten_json_tree(tree(), source="s.json", merge_chars=500)}
+    by_id = {
+        d.id: d for d in _flatten_json_tree(tree(), source="s.json", merge_chars=500)
+    }
 
     assert by_id["s.json#0"].citations == [LAW, PAGE]
 
@@ -87,8 +89,13 @@ def test_same_url_clause_citations_collapse_to_the_section():
                 "text": "",
                 "source": [section],
                 "children": [
-                    {"marker": f"({m})", "text": f"clause {m}",
-                     "source": [{"text": f"חוק, סעיף 7({m})", "url": "https://nevo/law"}]}
+                    {
+                        "marker": f"({m})",
+                        "text": f"clause {m}",
+                        "source": [
+                            {"text": f"חוק, סעיף 7({m})", "url": "https://nevo/law"}
+                        ],
+                    }
                     for m in "אבג"
                 ],
             }
@@ -139,7 +146,10 @@ def test_prompt_lists_citations_under_their_passage():
         ],
     )
 
-    assert f"[1] cited\nמקור: {LAW['text']} ({LAW['url']})\nמקור: {BARE['url']}\n\n" in message
+    assert (
+        f"[1] cited\nמקור: {LAW['text']} ({LAW['url']})\nמקור: {BARE['url']}\n\n"
+        in message
+    )
     assert "[2] uncited\n\n" in message
 
 
@@ -169,20 +179,39 @@ def test_nevo_cites_clause_paths_chapters_and_schedule_items():
                 "title": "פרק א'",
                 "children": [
                     {
-                        "type": "section", "marker": "3 א.", "text": "",
+                        "type": "section",
+                        "marker": "3 א.",
+                        "text": "",
                         "children": [
-                            {"marker": "(ב)", "text": "b", "children": [
-                                {"marker": "(1)", "text": "b1", "children": []},
-                                {"marker": "", "text": "definition", "children": []},
-                            ]},
+                            {
+                                "marker": "(ב)",
+                                "text": "b",
+                                "children": [
+                                    {"marker": "(1)", "text": "b1", "children": []},
+                                    {
+                                        "marker": "",
+                                        "text": "definition",
+                                        "children": [],
+                                    },
+                                ],
+                            },
                         ],
                     },
                 ],
             },
             {"type": "chapter", "title": "תוספת שניה", "children": []},
-            {"type": "chapter", "title": "(סעיף 7(3))", "children": [
-                {"type": "section", "marker": "28.", "text": "item", "children": []},
-            ]},
+            {
+                "type": "chapter",
+                "title": "(סעיף 7(3))",
+                "children": [
+                    {
+                        "type": "section",
+                        "marker": "28.",
+                        "text": "item",
+                        "children": [],
+                    },
+                ],
+            },
         ],
     }
     _add_sources(t, url)
@@ -229,13 +258,17 @@ def test_govil_chapters_cite_their_chapter_page():
     def chapter(body):
         return {"htmlContents": [{"order": 0, "sectionData": f"<p>{body}</p>"}]}
 
-    nav = {"tagItems": [
-        {"title": "רקע", "url": "/he/pages/guide"},
-        {"title": "זכאים", "url": "/he/pages/guide?chapterIndex=2"},
-    ]}
+    nav = {
+        "tagItems": [
+            {"title": "רקע", "url": "/he/pages/guide"},
+            {"title": "זכאים", "url": "/he/pages/guide?chapterIndex=2"},
+        ]
+    }
     payloads = [
-        {"contentHead": {"title": "מדריך", "description": "lead"},
-         "contentMain": {**chapter("first"), "sideNav": nav}},
+        {
+            "contentHead": {"title": "מדריך", "description": "lead"},
+            "contentMain": {**chapter("first"), "sideNav": nav},
+        },
         {"contentMain": chapter("second")},
     ]
     url = "https://www.gov.il/he/pages/guide"

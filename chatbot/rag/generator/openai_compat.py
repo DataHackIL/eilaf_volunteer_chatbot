@@ -74,8 +74,7 @@ class OpenAICompatibleGenerator(Generator):
             api_key = os.environ.get(self.key_env)
             if not api_key:
                 raise RuntimeError(
-                    f"{self.key_env} is not set — add it to .env to use "
-                    f"{self.base_url}"
+                    f"{self.key_env} is not set — add it to .env to use {self.base_url}"
                 )
             self._client = OpenAI(
                 base_url=self.base_url, api_key=api_key, max_retries=self.max_retries

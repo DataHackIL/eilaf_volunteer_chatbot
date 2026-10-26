@@ -94,7 +94,10 @@ def test_packing_fills_the_budget():
     # Greedy packing: adjacent short lines share a chunk instead of each
     # becoming its own, which would re-introduce over-granularity.
     text = "\n".join(["אבג"] * 10)
-    assert _split_text(text, 20) == ["אבג\nאבג\nאבג\nאבג\nאבג", "אבג\nאבג\nאבג\nאבג\nאבג"]
+    assert _split_text(text, 20) == [
+        "אבג\nאבג\nאבג\nאבג\nאבג",
+        "אבג\nאבג\nאבג\nאבג\nאבג",
+    ]
 
 
 @pytest.mark.parametrize("text", ["", "   ", "\n\n"])

@@ -49,7 +49,9 @@ def test_ids_encode_index_path(tree):
 
 
 def test_parent_id_links_to_immediate_parent(tree):
-    by_id = {d.id: d for d in _flatten_json_tree(tree, source="src.json", merge_chars=0)}
+    by_id = {
+        d.id: d for d in _flatten_json_tree(tree, source="src.json", merge_chars=0)
+    }
 
     # Clauses point at their section; the section is top-level so has no parent.
     assert by_id["src.json#0/0"].parent_id == "src.json#0"

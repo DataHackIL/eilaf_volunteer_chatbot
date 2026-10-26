@@ -102,15 +102,21 @@ context = st.text_input(T.CONTEXT_PROMPT.value, value=DEFAULT_CONTEXT_ANCHOR)
 # the description). A live tuning knob: it re-encodes the query per query, so it
 # needs no rebuild of the cached pipeline. Defaults to the pipeline's own value.
 context_weight = st.sidebar.slider(
-    T.CONTEXT_WEIGHT.value, min_value=0.0, max_value=1.0,
-    value=float(pipeline.context_weight), step=0.05,
+    T.CONTEXT_WEIGHT.value,
+    min_value=0.0,
+    max_value=1.0,
+    value=float(pipeline.context_weight),
+    step=0.05,
 )
 
 # How many nearest peer clauses to append per match for lateral context. Like
 # the weight above, it's a per-query override, so no rebuild of the pipeline.
 sibling_k = st.sidebar.slider(
-    T.SIBLING_K.value, min_value=0, max_value=5,
-    value=int(pipeline.sibling_k), step=1,
+    T.SIBLING_K.value,
+    min_value=0,
+    max_value=5,
+    value=int(pipeline.sibling_k),
+    step=1,
 )
 
 # Which head phrases the answer from the retrieved passages: "echo" returns them
@@ -135,7 +141,11 @@ generator = get_generators()[gen_key]
 # scraping pass; until then these are wired but inert.
 with st.expander(T.FILTER_EXPANDER.value):
     specify_age = st.checkbox(T.SPECIFY_AGE.value)
-    age = st.number_input(T.AGE.value, min_value=0, max_value=120, value=30, step=1) if specify_age else None
+    age = (
+        st.number_input(T.AGE.value, min_value=0, max_value=120, value=30, step=1)
+        if specify_age
+        else None
+    )
     gender_options = {
         T.GENDER_UNSPECIFIED.value: None,
         T.GENDER_FEMALE.value: "f",
@@ -145,11 +155,16 @@ with st.expander(T.FILTER_EXPANDER.value):
     # Categorical locality (CBS list). ``None`` is the "unspecified" option;
     # options are labelled in the UI language (English shows the Latin
     # transliteration), while the value stored in `facts` is the Hebrew name.
-    locality_choices = [None, *sorted(load_localities(), key=lambda loc: loc.label(lang))]
+    locality_choices = [
+        None,
+        *sorted(load_localities(), key=lambda loc: loc.label(lang)),
+    ]
     locality = st.selectbox(
         T.LOCALITY.value,
         options=locality_choices,
-        format_func=lambda loc: T.LOCALITY_UNSPECIFIED.value if loc is None else loc.label(lang),
+        format_func=lambda loc: (
+            T.LOCALITY_UNSPECIFIED.value if loc is None else loc.label(lang)
+        ),
     )
 
 facts: dict = {}
@@ -163,7 +178,10 @@ if locality is not None:
 
 if query:
     contexts = pipeline.retrieve(
-        query, facts or None, context=context, context_weight=context_weight,
+        query,
+        facts or None,
+        context=context,
+        context_weight=context_weight,
         sibling_k=sibling_k,
     )
     # A missing key or an exhausted free-tier quota surfaces here as an SDK

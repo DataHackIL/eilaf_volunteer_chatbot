@@ -17,7 +17,9 @@ from chatbot.rag.pipeline.pipeline import RAGPipeline
 
 def _main() -> None:
     parser = argparse.ArgumentParser(description="BM25 threshold precision gauge.")
-    parser.add_argument("--tau", type=float, default=0.5, help="relevance threshold in [0, 1]")
+    parser.add_argument(
+        "--tau", type=float, default=0.5, help="relevance threshold in [0, 1]"
+    )
     args = parser.parse_args()
 
     queries = [line.strip() for line in sys.stdin if line.strip()]

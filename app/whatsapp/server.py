@@ -128,8 +128,13 @@ async def verify(request: Request) -> Response:
     """Meta webhook verification: echo the challenge when the token matches."""
     params = request.query_params
     expected = config.require("WHATSAPP_VERIFY_TOKEN", config.VERIFY_TOKEN)
-    if params.get("hub.mode") == "subscribe" and params.get("hub.verify_token") == expected:
-        return Response(content=params.get("hub.challenge", ""), media_type="text/plain")
+    if (
+        params.get("hub.mode") == "subscribe"
+        and params.get("hub.verify_token") == expected
+    ):
+        return Response(
+            content=params.get("hub.challenge", ""), media_type="text/plain"
+        )
     raise HTTPException(status_code=403, detail="verification failed")
 
 

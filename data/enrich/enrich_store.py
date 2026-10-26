@@ -28,7 +28,9 @@ def _text_nodes(tree: dict) -> Iterator[dict]:
     yield from walk(tree.get("children", []))
 
 
-def _existing_annotations(existing_tree: dict | None) -> dict[str, tuple[bool, dict | None]]:
+def _existing_annotations(
+    existing_tree: dict | None,
+) -> dict[str, tuple[bool, dict | None]]:
     """Map segment text -> (useful, meta) from a previously enriched tree."""
     cache: dict[str, tuple[bool, dict | None]] = {}
     if not existing_tree:

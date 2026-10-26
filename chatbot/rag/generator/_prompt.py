@@ -34,6 +34,7 @@ def build_system(language: str = "Hebrew") -> str:
         "its link when one is given."
     )
 
+
 # Returned directly (no API call) when retrieval produced nothing to ground on.
 NO_CONTEXT = "לא נמצא מידע רלוונטי לשאלה במאגר."
 

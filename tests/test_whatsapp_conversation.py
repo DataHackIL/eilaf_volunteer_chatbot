@@ -55,7 +55,9 @@ class _FakePipeline:
                 text="clause",
                 source="benefits.json",
                 id="benefits.json#0",
-                citations=[{"text": "Benefits guide", "url": "https://example.org/benefits"}],
+                citations=[
+                    {"text": "Benefits guide", "url": "https://example.org/benefits"}
+                ],
             )
         ]
 
@@ -391,7 +393,9 @@ def webhook_client(monkeypatch):
     monkeypatch.setattr(server.config, "VERIFY_TOKEN", "verify-me")
     monkeypatch.setattr(server.config, "APP_SECRET", "")  # skip signature in tests
     sent: list = []
-    monkeypatch.setattr(server, "_send", lambda wa_id, reply: sent.append((wa_id, reply)))
+    monkeypatch.setattr(
+        server, "_send", lambda wa_id, reply: sent.append((wa_id, reply))
+    )
     with TestClient(server.app) as client:
         yield client, sent
 
@@ -414,7 +418,11 @@ def test_webhook_verification_rejects_bad_token(webhook_client):
     client, _ = webhook_client
     resp = client.get(
         "/webhook",
-        params={"hub.mode": "subscribe", "hub.verify_token": "wrong", "hub.challenge": "x"},
+        params={
+            "hub.mode": "subscribe",
+            "hub.verify_token": "wrong",
+            "hub.challenge": "x",
+        },
     )
     assert resp.status_code == 403
 
@@ -431,7 +439,11 @@ def test_webhook_dispatches_inbound_text(webhook_client):
                         "field": "messages",
                         "value": {
                             "messages": [
-                                {"from": "972500000000", "type": "text", "text": {"body": "hi"}}
+                                {
+                                    "from": "972500000000",
+                                    "type": "text",
+                                    "text": {"body": "hi"},
+                                }
                             ]
                         },
                     }
@@ -449,7 +461,9 @@ def test_webhook_dispatches_inbound_text(webhook_client):
 
 def test_webhook_ignores_status_callbacks(webhook_client):
     client, sent = webhook_client
-    payload = {"entry": [{"changes": [{"value": {"statuses": [{"status": "delivered"}]}}]}]}
+    payload = {
+        "entry": [{"changes": [{"value": {"statuses": [{"status": "delivered"}]}}]}]
+    }
     resp = client.post("/webhook", json=payload)
     assert resp.status_code == 200
     assert sent == []
@@ -594,10 +608,14 @@ def test_send_failure_carries_the_graph_api_explanation(monkeypatch):
     is where Meta actually says *why* — an expired token and a recipient missing
     from the test allow-list look identical in the log without it.
     """
-    body = '{"error":{"message":"(#131030) Recipient phone number not in allowed list"}}'
+    body = (
+        '{"error":{"message":"(#131030) Recipient phone number not in allowed list"}}'
+    )
     request = httpx.Request("POST", "https://graph.facebook.com/v21.0/1/messages")
     monkeypatch.setattr(
-        client.httpx, "post", lambda *a, **k: httpx.Response(400, text=body, request=request)
+        client.httpx,
+        "post",
+        lambda *a, **k: httpx.Response(400, text=body, request=request),
     )
     monkeypatch.setattr(client.config, "ACCESS_TOKEN", "t0ken")
     monkeypatch.setattr(client.config, "PHONE_NUMBER_ID", "1")
@@ -783,7 +801,9 @@ def test_each_language_phrase_restarts(fake_pipeline):
         conversation.handle_message("u-lang", text="what am I entitled to?")
         conversation.handle_message("u-lang", text="what am I entitled to?")
         conversation.handle_message("u-lang", text=phrase)
-        assert conversation._SESSIONS["u-lang"].query == "", f"{phrase!r} did not restart"
+        assert conversation._SESSIONS["u-lang"].query == "", (
+            f"{phrase!r} did not restart"
+        )
 
 
 def test_welcome_tells_the_user_how_to_restart(fake_pipeline):
@@ -877,7 +897,9 @@ def test_typed_text_at_the_consent_step_is_not_consent(fake_pipeline, store):
 
         assert store.saved == [], f"{answer!r} wrongly approved a report"
         assert _button_ids(replies[0]) == ["report:approve", "report:cancel"]
-        assert conversation._SESSIONS["u-typed"].step is conversation.Step.REPORT_CONSENT
+        assert (
+            conversation._SESSIONS["u-typed"].step is conversation.Step.REPORT_CONSENT
+        )
 
 
 def test_cancel_saves_nothing_and_returns_to_the_question_step(fake_pipeline, store):
@@ -1043,7 +1065,11 @@ def test_welcome_tells_the_user_how_to_report(fake_pipeline):
 
 @pytest.mark.parametrize(
     "phrase,language",
-    [("report", Language.ENGLISH), ("דיווח", Language.HEBREW), ("تبليغ", Language.ARABIC)],
+    [
+        ("report", Language.ENGLISH),
+        ("דיווח", Language.HEBREW),
+        ("تبليغ", Language.ARABIC),
+    ],
 )
 def test_reporting_as_the_very_first_message_reads_in_that_language(
     fake_pipeline, store, phrase, language
@@ -1118,7 +1144,9 @@ def test_s3_store_key_layout_and_body():
     assert location == f"s3://eilaf-reports/{call['Key']}"
 
 
-@pytest.mark.parametrize("prefix", ["conversations", "conversations/", "/conversations/"])
+@pytest.mark.parametrize(
+    "prefix", ["conversations", "conversations/", "/conversations/"]
+)
 def test_s3_prefix_is_normalised(prefix):
     """Joining a prefix blindly gives "conversations2026/…" or a double slash,
     each of which reads as a different folder in the console."""
@@ -1210,7 +1238,9 @@ def test_correcting_the_language_repeats_the_notice(dev_mode, language):
     the welcome — which is where the notice was."""
     conversation.reset("u-devlang")
     conversation.handle_message("u-devlang", text="hello")
-    replies = conversation.handle_message("u-devlang", button_id=f"lang:{language.value}")
+    replies = conversation.handle_message(
+        "u-devlang", button_id=f"lang:{language.value}"
+    )
     assert TEXTS[language].DEV_NOTICE.value in replies[0].body
 
 
@@ -1266,7 +1296,9 @@ def test_the_dev_autosave_never_breaks_a_conversation(
     conversation.reset("u-devfail")
     conversation.handle_message("u-devfail", text="hello")
     with caplog.at_level(logging.WARNING):
-        replies = conversation.handle_message("u-devfail", text="what am I entitled to?")
+        replies = conversation.handle_message(
+            "u-devfail", text="what am I entitled to?"
+        )
 
     assert "answer[" in replies[0].body
     assert "bucket on fire" in caplog.text

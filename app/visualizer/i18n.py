@@ -69,16 +69,18 @@ class HebrewText(Enum):
     GENERATOR_ERROR = "יצירת התשובה נכשלה: {error}"
     # WhatsApp conversation flow.
     SKIP = "דלג"
-    ASK_ANOTHER = "אפשר לשאול שאלה נוספת, או להוסיף פרטים על האירוע כדי לדייק את התשובה."
+    ASK_ANOTHER = (
+        "אפשר לשאול שאלה נוספת, או להוסיף פרטים על האירוע כדי לדייק את התשובה."
+    )
     ADD_DETAILS = "הוספת פרטים"
     EXPAND_PROMPT = "כמה מילים על מה שקרה, ואחזור לתשובה מדויקת יותר."
     INVALID_AGE = "נא להזין גיל תקין (מספר), או ללחוץ על דילוג."
     WELCOME = "שלום! אני הצ'אטבוט של אילאף, ואפשר לשאול אותי על זכויות וסיוע לנפגעי אירועי אלימות."
-    CHANGE_LANGUAGE = "לשינוי שפה: לחצו על אחד הכפתורים, או כתבו \"שפה\" בכל שלב."
+    CHANGE_LANGUAGE = 'לשינוי שפה: לחצו על אחד הכפתורים, או כתבו "שפה" בכל שלב.'
     RESTART_DONE = "התחלנו מחדש."
-    RESTART_HINT = "לאיפוס השיחה בכל שלב: כתבו \"התחל מחדש\"."
+    RESTART_HINT = 'לאיפוס השיחה בכל שלב: כתבו "התחל מחדש".'
     # Reporting a conversation (saved only after an explicit approval).
-    REPORT_HINT = "לדיווח על השיחה בכל שלב: כתבו \"דיווח\"."
+    REPORT_HINT = 'לדיווח על השיחה בכל שלב: כתבו "דיווח".'
     REPORT_CONSENT = (
         "דיווח על השיחה פירושו שנשמור עותק שלה באחסון לטווח ארוך, "
         "כדי שצוות אילאף יוכל לקרוא אותה ולטפל בה. "
@@ -137,11 +139,11 @@ class ArabicText(Enum):
     EXPAND_PROMPT = "احكوا بكلمتين شو صار، ورجّع جواب أدقّ."
     INVALID_AGE = "لطفاً دخّلوا عمر صحيح (رقم)، أو اضغطوا تخطّي."
     WELCOME = "مرحبا! أنا الشات بوت تبع إيلاف، وفيكم تسألوني عن الحقوق والمساعدة لمتضرري حوادث العنف."
-    CHANGE_LANGUAGE = "لتغيير اللغة: اضغطوا على أحد الأزرار، أو اكتبوا \"لغة\" بأي وقت."
+    CHANGE_LANGUAGE = 'لتغيير اللغة: اضغطوا على أحد الأزرار، أو اكتبوا "لغة" بأي وقت.'
     RESTART_DONE = "بدأنا من جديد."
-    RESTART_HINT = "لإعادة المحادثة في أي وقت: اكتبوا \"من البداية\"."
+    RESTART_HINT = 'لإعادة المحادثة في أي وقت: اكتبوا "من البداية".'
     # Reporting a conversation (saved only after an explicit approval).
-    REPORT_HINT = "للتبليغ عن المحادثة بأي وقت: اكتبوا \"تبليغ\"."
+    REPORT_HINT = 'للتبليغ عن المحادثة بأي وقت: اكتبوا "تبليغ".'
     REPORT_CONSENT = (
         "التبليغ عن المحادثة يعني إنّنا رح نحتفظ بنسخة منها بتخزين طويل الأمد، "
         "حتى فريق إيلاف يقدر يقرأها ويتابعها. "
@@ -196,14 +198,18 @@ class EnglishText(Enum):
     SKIP = "Skip"
     ASK_ANOTHER = "You can ask another question, or add details about what happened to sharpen the answer."
     ADD_DETAILS = "Add details"
-    EXPAND_PROMPT = "A few words about what happened, and I'll give a more precise answer."
+    EXPAND_PROMPT = (
+        "A few words about what happened, and I'll give a more precise answer."
+    )
     INVALID_AGE = "Please enter a valid age (a number), or tap Skip."
     WELCOME = "Hi! I'm the Eilaf chatbot — ask me about the rights of, and support for, victims of violent events."
-    CHANGE_LANGUAGE = "To change language: tap one of the buttons, or type \"language\" at any point."
+    CHANGE_LANGUAGE = (
+        'To change language: tap one of the buttons, or type "language" at any point.'
+    )
     RESTART_DONE = "Started fresh."
-    RESTART_HINT = "To restart the conversation at any point, type \"restart\"."
+    RESTART_HINT = 'To restart the conversation at any point, type "restart".'
     # Reporting a conversation (saved only after an explicit approval).
-    REPORT_HINT = "To report this conversation at any point, type \"report\"."
+    REPORT_HINT = 'To report this conversation at any point, type "report".'
     REPORT_CONSENT = (
         "Reporting means we keep a copy of this conversation in long-term "
         "storage, so the Eilaf team can read it and follow up. "

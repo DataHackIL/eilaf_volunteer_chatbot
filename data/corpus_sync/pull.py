@@ -25,7 +25,7 @@ def parse_s3_uri(uri: str) -> tuple[str, str]:
     """``s3://bucket/some/prefix`` -> (``bucket``, ``some/prefix/``)."""
     if not uri.startswith("s3://"):
         raise ValueError(f"not an s3:// URI: {uri!r}")
-    bucket, _, prefix = uri[len("s3://"):].partition("/")
+    bucket, _, prefix = uri[len("s3://") :].partition("/")
     if not bucket:
         raise ValueError(f"no bucket in {uri!r}")
     if prefix and not prefix.endswith("/"):
@@ -68,9 +68,11 @@ def pull_corpus(client, uri: str, dest: Path) -> PullResult:
     owner = dest.stat()
     result = PullResult()
 
-    for page in client.get_paginator("list_objects_v2").paginate(Bucket=bucket, Prefix=prefix):
+    for page in client.get_paginator("list_objects_v2").paginate(
+        Bucket=bucket, Prefix=prefix
+    ):
         for obj in page.get("Contents", []):
-            rel = obj["Key"][len(prefix):]
+            rel = obj["Key"][len(prefix) :]
             if not rel or rel.endswith("/"):
                 continue  # the prefix itself, or a console-made "folder"
             target = (dest / rel).resolve()

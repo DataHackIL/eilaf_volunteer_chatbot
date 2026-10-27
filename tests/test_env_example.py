@@ -19,7 +19,11 @@ EXAMPLE = ROOT / ".env.example"
 # boot path that pulls and curates the corpus. scripts/ is left out on purpose —
 # those are operator tools run from a laptop, not settings of the bot.
 _PY_DIRS = ("app", "chatbot", "data")
-_SHELL_FILES = ("app/whatsapp/docker-compose.yml", "app/whatsapp/entrypoint.sh")
+_SHELL_FILES = (
+    "app/whatsapp/docker-compose.yml",
+    "app/whatsapp/tunnel.yml",
+    "app/whatsapp/entrypoint.sh",
+)
 
 _PY_READ = re.compile(
     r"""environ(?:\.get)?[(\[]\s*["']([A-Z][A-Z0-9_]+)["']"""  # os.environ.get("X") / ["X"]

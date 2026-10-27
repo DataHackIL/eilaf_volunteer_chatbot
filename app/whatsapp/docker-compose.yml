@@ -6,6 +6,13 @@
 # Put that URL + "/webhook" into the Meta webhook config. Settings come from the
 # repo-root .env at runtime (copy .env.example) — nothing is baked into the image.
 
+# The tunnel lives in its own file so it can read TUNNEL_TOKEN from the
+# repo-root .env: compose fills ${...} only from the shell, except in an
+# included file given its own env_file, as here. The shell still wins.
+include:
+  - path: tunnel.yml
+    env_file: ../../.env
+
 services:
   chatbot:
     build:
@@ -63,32 +70,6 @@ services:
       # as the reports, and excluded from deploy.sh's rsync --delete likewise.
       # Unused unless EILAF_USER_SALT is set in .env.
       - ../../data/users:/app/data/users
-    restart: unless-stopped
-
-  tunnel:
-    image: cloudflare/cloudflared:latest
-    # Two modes, selected by the two variables below.
-    #
-    # DEFAULT — quick tunnel. Zero setup, but the hostname is random and changes
-    # on every restart of this container, including an unattended reboot. Each
-    # change silently deafens the bot: Meta keeps reporting a healthy callback
-    # URL while every message goes to a hostname that no longer exists.
-    #
-    # NAMED TUNNEL — a stable hostname. Set BOTH together:
-    #   TUNNEL_TOKEN=<token from the Cloudflare dashboard>
-    #   TUNNEL_RUN_ARGS=run
-    # then `docker compose up -d`. Setting only one is the failure to watch for:
-    # a token without `run` silently stays on a quick tunnel, and `run` without a
-    # token exits immediately (the logs say so plainly).
-    #
-    # Prerequisite: a named tunnel serves a hostname from a DNS zone you control,
-    # so this needs a domain added to Cloudflare. Without one it cannot give you
-    # a stable public URL — see SETUP.md for the alternatives.
-    command: tunnel --no-autoupdate ${TUNNEL_RUN_ARGS:---url http://chatbot:8000}
-    environment:
-      TUNNEL_TOKEN: "${TUNNEL_TOKEN:-}"
-    depends_on:
-      - chatbot
     restart: unless-stopped
 
 volumes:

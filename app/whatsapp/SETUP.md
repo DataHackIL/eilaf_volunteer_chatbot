@@ -139,8 +139,8 @@ docker compose logs tunnel | grep trycloudflare
 > - Your machine and the stack must stay running to receive messages.
 > - The free `trycloudflare.com` URL **changes each run**. For a URL that
 >   survives restarts (register the webhook once), create a **named tunnel** in
->   the Cloudflare dashboard and use its `TUNNEL_TOKEN` — see the commented block
->   in `docker-compose.yml`.
+>   the Cloudflare dashboard and put its token in `.env` as `TUNNEL_TOKEN` — see
+>   "Getting a stable public URL" below.
 
 ### Rebuilding the corpus at boot (`SKIP_DATA_CURATION`)
 
@@ -476,14 +476,17 @@ have a domain added to Cloudflare. With one:
 1. Cloudflare dashboard → **Zero Trust → Networks → Tunnels → Create a tunnel**
 2. Choose **Cloudflared**, name it, copy the **token**
 3. Add a **Public hostname**: your subdomain → `http://chatbot:8000`
-4. Run with both variables set:
+4. Put the token in the repo-root `.env` and recreate the tunnel:
 
 ```bash
-TUNNEL_TOKEN=<token> TUNNEL_RUN_ARGS=run docker compose up -d
+TUNNEL_TOKEN=<token>                     # in .env
+docker compose up -d --force-recreate tunnel
 ```
 
-Set them together — a token without `TUNNEL_RUN_ARGS=run` silently stays on a
-quick tunnel, which is exactly the failure this is meant to end.
+With a token the tunnel runs as that named tunnel; blank, it falls back to a
+quick tunnel (see `app/whatsapp/tunnel.yml`). Register `https://<your
+hostname>/webhook` with Meta once — it no longer changes. This needs a domain on
+Cloudflare, not a paid plan.
 
 **Without a domain**, a named tunnel cannot help, and the options are:
 

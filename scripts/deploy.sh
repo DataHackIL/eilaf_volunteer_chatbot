@@ -417,8 +417,8 @@ deploy:
 deploy:     $URL/webhook
 deploy:
 deploy: The trycloudflare hostname changes on every recreate. For a URL that
-deploy: survives a redeploy, switch to a named tunnel (TUNNEL_TOKEN) — see the
-deploy: commented block in app/whatsapp/docker-compose.yml.
+deploy: survives a redeploy, set TUNNEL_TOKEN in .env to a named tunnel's
+deploy: token — see .env.example and app/whatsapp/tunnel.yml.
 EOF
 else
     echo "deploy: no WORKING trycloudflare URL — expected if you run a named" >&2

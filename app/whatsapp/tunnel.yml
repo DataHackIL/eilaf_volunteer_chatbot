@@ -1,0 +1,26 @@
+# The public HTTPS endpoint Meta posts to, included by docker-compose.yml.
+#
+# Which tunnel runs depends on TUNNEL_TOKEN in the repo-root .env:
+#
+#   unset   QUICK TUNNEL. Zero setup, but the hostname is random and changes on
+#           every restart of this container, including an unattended reboot.
+#           Each change silently deafens the bot: Meta keeps reporting a healthy
+#           callback URL while every message goes to a hostname that no longer
+#           exists. Read the URL with `docker compose logs tunnel`.
+#
+#   set     NAMED TUNNEL. A stable hostname, registered with Meta once. The
+#           token comes from the Cloudflare dashboard (Zero Trust > Networks >
+#           Tunnels), and the tunnel's public hostname must point at
+#           http://chatbot:8000. It needs a domain on Cloudflare, not a paid
+#           plan. See SETUP.md.
+#
+# The image has no shell, so the choice is made here, when compose builds the
+# command line: `run --token <token>` with a token, `--url` (a quick tunnel)
+# without one. Same form as the docker command the Cloudflare dashboard gives.
+services:
+  tunnel:
+    image: cloudflare/cloudflared:latest
+    command: tunnel --no-autoupdate ${TUNNEL_TOKEN:+run --token} ${TUNNEL_TOKEN:---url http://chatbot:8000}
+    depends_on:
+      - chatbot
+    restart: unless-stopped

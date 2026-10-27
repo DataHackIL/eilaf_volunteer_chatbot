@@ -40,14 +40,10 @@ dependencies = [
     "boto3",
 ]
 
-# Opt-in units. The WhatsApp webhook server imports neither, and together they
-# pull 616 MB of wheels into an image that would never touch them — pyarrow and
-# pandas behind streamlit, ctranslate2 and onnxruntime behind faster-whisper.
-# (Measured: site-packages in the container went 2119 MB -> 1503 MB when these
-# two moved out here.) On a dev machine take them all: `uv sync --all-extras`.
+# Opt-in units. The WhatsApp webhook server does not import them, and they pull
+# heavy wheels (ctranslate2, onnxruntime behind faster-whisper) into an image
+# that would never touch them. On a dev machine: `uv sync --all-extras`.
 [project.optional-dependencies]
-# The Streamlit front-ends: app/visualizer (the RAG explorer) and app/stt_eval.
-apps = ["streamlit"]
 # The transcription/ unit, which merges in on its own branch (see the packages
 # note below — `find` tolerates it being absent).
 stt = ["faster-whisper"]

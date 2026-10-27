@@ -1,8 +1,7 @@
 """Per-user conversation state machine for the WhatsApp front-end.
 
-WhatsApp has no equivalent of Streamlit's ``st.session_state``, so we keep our
-own per-user state (keyed by the sender's WhatsApp id, ``wa_id``) and serialize
-the Streamlit app's one-page inputs into a multi-turn dialog:
+WhatsApp carries no session of its own, so we keep per-user state (keyed by the
+sender's WhatsApp id, ``wa_id``) and run each user through a multi-turn dialog:
 
     question → answer (language auto-detected; event details optional, on request)
 
@@ -27,7 +26,7 @@ Latin letters is the realistic case) is corrected with the reply buttons on the
 opening message, or by typing "language" at any point.
 
 Each optional step offers a **Skip** button; the collected answers become the
-same ``facts`` dict the Streamlit app builds (``streamlit_app.py`` ~L146), then
+``facts`` dict the pipeline's metadata filter reads, then
 we call the shared pipeline and reply in the user's language.
 
 A conversation ends in one of three ways: the user types a restart keyword
@@ -759,7 +758,7 @@ def _run_pipeline(session: Session) -> list[Reply]:
         session.query, session.facts or None, context=session.context
     )
     # Retrieval already succeeded; a generator key/quota error still lets us show
-    # the sources, mirroring the Streamlit app's try/except.
+    # the sources.
     try:
         answer = pipeline.generator.generate(
             session.query, contexts, session.language.prompt_name

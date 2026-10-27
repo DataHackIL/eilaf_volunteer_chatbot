@@ -59,7 +59,7 @@ class _FakeClient:
 # --- construction is inert -------------------------------------------------
 
 def test_construction_touches_nothing():
-    """The Streamlit app builds every head up front; this one must stay cheap."""
+    """A caller may build every head up front; this one must stay cheap."""
     gen = BedrockGenerator()
     assert gen.last_usage is None
     assert gen._client is None

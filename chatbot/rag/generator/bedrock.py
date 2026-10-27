@@ -19,8 +19,8 @@ goes rather than what it says:
   ``EILAF_BEDROCK_MODEL``.
 
 Both the SDK import and the region/model resolution are lazy, so constructing
-this head costs nothing and needs no AWS at all — the Streamlit app builds every
-generator up front and must not fail because Bedrock happens to be unconfigured.
+this head costs nothing and needs no AWS at all — a caller that builds every
+generator up front must not fail because Bedrock happens to be unconfigured.
 """
 
 from __future__ import annotations

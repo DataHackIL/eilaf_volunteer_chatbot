@@ -74,7 +74,7 @@ from datetime import UTC, datetime
 from enum import Enum, auto
 
 from app.language import detect_language
-from app.visualizer.i18n import TEXTS, Language
+from app.i18n import TEXTS, Language
 from app.whatsapp import config
 from app.whatsapp.pipeline_singleton import get_pipeline
 from app.whatsapp.reporting import build_report, get_report_store

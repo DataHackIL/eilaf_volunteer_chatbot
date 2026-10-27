@@ -20,7 +20,7 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 
-from app.visualizer.i18n import TEXTS, ArabicText, EnglishText, HebrewText, Language
+from app.i18n import TEXTS, ArabicText, EnglishText, HebrewText, Language
 from app.whatsapp import client, config, conversation, server
 from app.whatsapp.reporting import (
     LocalReportStore,

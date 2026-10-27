@@ -1,7 +1,7 @@
 """Runtime configuration for the WhatsApp Cloud API front-end.
 
 Every value comes from an environment variable, loaded from the repo-root
-``.env`` (same explicit-path pattern as ``app/visualizer/streamlit_app.py``).
+``.env`` (explicit path, so it resolves however the server is launched).
 Secrets are **never** hard-coded here or baked into the Docker image — they are
 injected at run time via ``--env-file .env``. See ``app/whatsapp/SETUP.md`` for
 how to obtain each value from the Meta developer dashboard.

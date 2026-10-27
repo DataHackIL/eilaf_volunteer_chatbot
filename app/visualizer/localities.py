@@ -1,4 +1,4 @@
-"""Loads the CBS locality list (``app/localities.csv``) for the locality filter.
+"""Loads the CBS locality list (``app/visualizer/localities.csv``) for the locality filter.
 
 The file is Israel Central Bureau of Statistics data in ``windows-1255``. Only
 two columns are used: the Hebrew name and its Latin transliteration; no Arabic
@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 
-from app.visualizer.i18n import Language
+from app.i18n import Language
 
 _CSV_PATH = Path(__file__).resolve().parent / "localities.csv"
 _ENCODING = "windows-1255"

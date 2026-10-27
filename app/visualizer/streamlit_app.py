@@ -13,8 +13,9 @@ from pathlib import Path
 import streamlit as st
 from dotenv import load_dotenv
 
-from app.localities import load_localities
-from app.visualizer.i18n import TEXTS, Language
+from app.visualizer.localities import load_localities
+from app.i18n import Language
+from app.visualizer.i18n import TEXTS
 from chatbot.rag.generator import (
     BedrockGenerator,
     ClaudeGenerator,

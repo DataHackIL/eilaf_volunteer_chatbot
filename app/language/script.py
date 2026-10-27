@@ -21,7 +21,7 @@ from __future__ import annotations
 from collections import Counter
 
 from app.language.base import LanguageDetector
-from app.visualizer.i18n import Language
+from app.i18n import Language
 
 # Inclusive code-point ranges per language. ``Language.ENGLISH`` stands in for
 # "Latin script" — of our three languages it is the only one written that way.

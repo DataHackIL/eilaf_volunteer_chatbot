@@ -38,6 +38,10 @@ RUN uv sync --no-install-project --no-dev
 COPY app ./app
 COPY chatbot ./chatbot
 RUN uv sync --no-dev
+# Streamlit is not a project dependency (develop and main ship only the WhatsApp
+# bot), so this branch installs it on top. Pinned to the last version the lock
+# carried; bump deliberately.
+RUN uv pip install --python /opt/venv/bin/python streamlit==1.59.2
 
 # Streamlit's default port.
 EXPOSE 8501

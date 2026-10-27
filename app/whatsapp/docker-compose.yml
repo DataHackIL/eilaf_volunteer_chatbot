@@ -82,9 +82,9 @@ services:
       - "8000:8000"
     volumes:
       - hf-cache:/models                # e5 weights persist across restarts (dev)
-      # Read-WRITE on purpose (the visualizer mounts the same dir read-only):
-      # curation has to persist the corpus and embedding cache back to the host,
-      # which is only safe while SKIP_DATA_CURATION is honoured above.
+      # Read-WRITE on purpose: curation has to persist the corpus and embedding
+      # cache back to the host, which is only safe while SKIP_DATA_CURATION is
+      # honoured above.
       - ../../data/static:/app/data/static  # corpus + embedding cache, bind-mounted
       # Where reports (and, under EILAF_ENV=dev, every conversation) land when
       # no EILAF_REPORT_BUCKET is set. Bind-mounted so they survive the

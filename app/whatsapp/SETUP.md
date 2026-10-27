@@ -1,7 +1,7 @@
 # WhatsApp chatbot — setup & run guide
 
 This is the WhatsApp front-end for the Eilaf RAG pipeline. It runs a webhook
-server that mirrors the Streamlit app as a multi-turn WhatsApp chat:
+server that answers users as a multi-turn WhatsApp chat:
 
 > question → answer (language auto-detected; event details optional, on request)
 

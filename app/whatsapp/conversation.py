@@ -72,8 +72,8 @@ from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from enum import Enum, auto
 
-from app.language import detect_language
 from app.i18n import TEXTS, Language
+from app.language import detect_language
 from app.whatsapp import config
 from app.whatsapp.pipeline_singleton import get_pipeline
 from app.whatsapp.reporting import build_report, get_report_store

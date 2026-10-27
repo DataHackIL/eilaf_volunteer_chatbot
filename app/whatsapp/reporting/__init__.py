@@ -2,8 +2,9 @@
 
 ``get_report_store()`` picks the implementation from configuration: the bucket
 when one is set (the production path), the local directory otherwise. Under
-``EILAF_ENV=prod`` a bucket is mandatory — ``config`` refuses to import without
-one — so the local branch cannot be reached by accident on a deployed host.
+``EILAF_ENV=prod`` a bucket is mandatory — the server refuses to boot without
+one (``config.wiring_problems``) — so the local branch cannot be reached by
+accident on a deployed host.
 """
 
 from __future__ import annotations

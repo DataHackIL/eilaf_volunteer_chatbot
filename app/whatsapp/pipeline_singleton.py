@@ -6,16 +6,34 @@ user, reuses the same warm pipeline. The corpus is never re-embedded per message
 per-user "session state" (which step a user is on) lives separately in
 ``conversation.py`` and never touches this singleton.
 
-The generator head is Gemini rotation (free tier, model-rotating) per the
-project decision; swap it here to change the answer engine globally.
+The answer engine is picked by ``EILAF_GENERATOR`` (``config.GENERATOR``):
+Gemini rotation — free tier, model-rotating — unless it says otherwise.
 """
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from functools import lru_cache
 
-from chatbot.rag.generator import gemini_rotation
+from app.whatsapp import config
+from chatbot.rag.generator import (
+    BedrockGenerator,
+    ClaudeGenerator,
+    ContextEchoGenerator,
+    Generator,
+    OpenAICompatibleGenerator,
+    gemini_rotation,
+)
 from chatbot.rag.pipeline import RAGPipeline
+
+# One factory per name in ``config.ENGINE_KEYS``, which lists the keys each needs.
+ENGINES: dict[str, Callable[[], Generator]] = {
+    "gemini": gemini_rotation,
+    "claude": ClaudeGenerator,
+    "bedrock": BedrockGenerator,
+    "cerebras": OpenAICompatibleGenerator,
+    "echo": ContextEchoGenerator,
+}
 
 
 @lru_cache(maxsize=1)
@@ -27,5 +45,5 @@ def get_pipeline() -> RAGPipeline:
     head is a plain attribute, so swapping it costs nothing.
     """
     pipeline = RAGPipeline.from_static_dir()
-    pipeline.generator = gemini_rotation()
+    pipeline.generator = ENGINES[config.GENERATOR]()
     return pipeline

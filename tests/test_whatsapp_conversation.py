@@ -530,6 +530,16 @@ def _no_token_probe(monkeypatch):
     )
 
 
+@pytest.fixture(autouse=True)
+def _wired(monkeypatch):
+    """Pass the boot-time wiring check; tests/test_whatsapp_wiring.py covers it.
+
+    It needs real credentials and a corpus on disk, neither of which a test
+    starting the app should depend on.
+    """
+    monkeypatch.setattr(server.config, "check_wiring", lambda: None)
+
+
 @pytest.fixture
 def webhook_client(monkeypatch):
     # Avoid loading the real e5 pipeline at lifespan startup.
@@ -750,9 +760,10 @@ def reload_config(monkeypatch):
     importlib.reload(config)
 
 
-def test_prod_refuses_to_import_without_app_secret(reload_config):
-    with pytest.raises(RuntimeError, match="WHATSAPP_APP_SECRET"):
-        reload_config(EILAF_ENV="prod", WHATSAPP_APP_SECRET="")
+def test_prod_refuses_to_boot_without_app_secret(reload_config):
+    reloaded = reload_config(EILAF_ENV="prod", WHATSAPP_APP_SECRET="")
+    problems = reloaded.wiring_problems()
+    assert any(p.startswith("WHATSAPP_APP_SECRET") for p in problems)
 
 
 def test_prod_imports_with_app_secret(reload_config):
@@ -764,14 +775,15 @@ def test_prod_imports_with_app_secret(reload_config):
     assert reloaded.APP_SECRET == "s3cret"
 
 
-def test_prod_refuses_to_import_without_a_report_bucket(reload_config):
+def test_prod_refuses_to_boot_without_a_report_bucket(reload_config):
     """Without one the report store falls back to a directory inside the
     container, which --force-recreate deletes — losing reports the user was
     told we had kept, with the save itself reporting success."""
-    with pytest.raises(RuntimeError, match="EILAF_REPORT_BUCKET"):
-        reload_config(
-            EILAF_ENV="prod", WHATSAPP_APP_SECRET="s3cret", EILAF_REPORT_BUCKET=""
-        )
+    reloaded = reload_config(
+        EILAF_ENV="prod", WHATSAPP_APP_SECRET="s3cret", EILAF_REPORT_BUCKET=""
+    )
+    problems = reloaded.wiring_problems()
+    assert any(p.startswith("EILAF_REPORT_BUCKET") for p in problems)
 
 
 def test_dev_still_tolerates_a_missing_app_secret(reload_config):

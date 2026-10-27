@@ -9,8 +9,8 @@ from __future__ import annotations
 
 import pytest
 
-from app.language import ScriptDetector, detect_language
 from app.i18n import Language
+from app.language import ScriptDetector, detect_language
 
 
 @pytest.mark.parametrize(

@@ -1,7 +1,22 @@
 # eilaf_volunteer_chatbot
 
-RAG-based volunteer chatbot for Eilaf, with scraping, embedding, and
-speech-to-text units.
+RAG-based volunteer chatbot for Eilaf, answering on WhatsApp, with scraping,
+embedding, and speech-to-text units.
+
+## Run the WhatsApp bot
+
+```bash
+cp .env.example .env              # then fill in its REQUIRED block
+cd app/whatsapp && docker compose up --build
+docker compose logs tunnel        # the public URL to give Meta
+```
+
+`.env.example` lists every setting with where to get it, and the server checks
+the required ones at boot: a missing value, a missing key for the chosen answer
+engine, or an empty corpus stops it with a message naming each one and its fix.
+On a fresh clone the corpus *is* empty, so build it first (next sections), or
+point `EILAF_CORPUS_S3_URI` at a copy in S3. The Meta side (app, tokens,
+webhook) is walked through in `app/whatsapp/SETUP.md`.
 
 ## Install / create the env
 
@@ -43,9 +58,8 @@ web / .docx  ──scrape──▶  data/static/raw/*.json  ──enrich──�
 > **Run this before the app — a fresh clone has no corpus.** The scraped and
 > enriched documents are deliberately kept out of git (`.gitignore` excludes
 > `data/static/**/*.json` and friends), so `data/static/raw/` and
-> `data/static/enriched/` start out empty. The app still *starts* on an empty
-> corpus — it fails quietly, returning blank answers to every question rather
-> than erroring — so if the bot comes up but answers nothing, that's the cause.
+> `data/static/enriched/` start out empty, and the WhatsApp server refuses to
+> boot on an empty corpus until they are filled.
 > The `.docx` sources are local/private files, so a clone can only rebuild the
 > web-scraped part of the corpus.
 
@@ -204,16 +218,19 @@ only files whose content differs (see `app/whatsapp/SETUP.md`).
 
 ## Answer-engine keys
 
-The answer heads read their keys from the repo-root `.env` (gitignored):
+`EILAF_GENERATOR` in `.env` picks the engine that phrases the bot's answers —
+`gemini` (default), `claude`, `bedrock`, `cerebras`, or `echo`, which returns the
+retrieved passages verbatim and needs no key. The heads read their keys from
+the same `.env`:
 
 ```bash
-GEMINI_API_KEY=...     # gemini engine (the WhatsApp bot's default)
+GEMINI_API_KEY=...     # gemini engine
 CEREBRAS_API_KEY=...   # cerebras engine
 ANTHROPIC_API_KEY=...  # claude engine
 ```
 
-Keys are resolved lazily, per engine — you only need the one for the engine
-you actually use.
+You only need the key for the engine you pick; the boot check says so if it is
+missing.
 
 The `bedrock` engine is the exception: it runs the same Claude model as
 `claude`, but through Amazon Bedrock on the project's own AWS account, so it

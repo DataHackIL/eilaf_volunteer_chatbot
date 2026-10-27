@@ -97,8 +97,37 @@ def _check_access_token() -> None:
         logger.info("access token ok, expires in %d days", left // 86400)
 
 
+def _log_wiring() -> None:
+    """One screen at boot saying what this instance is wired to.
+
+    The settings are scattered over .env, compose and their defaults; this is
+    the one place they are all visible, at the moment someone is watching.
+    """
+    store = (
+        config.REPORT_BUCKET and f"s3://{config.REPORT_BUCKET}/{config.REPORT_PREFIX}"
+    )
+    logger.info(
+        "wired up:\n"
+        "  mode            %s\n"
+        "  answer engine   %s (EILAF_GENERATOR)\n"
+        "  corpus          %d documents\n"
+        "  reports         %s\n"
+        "  returning users %s\n"
+        "  Meta webhook    callback URL = <public URL>/webhook, verify token = "
+        "WHATSAPP_VERIFY_TOKEN (with compose: docker compose logs tunnel)",
+        config.ENV or "local (EILAF_ENV unset)",
+        config.GENERATOR,
+        len(config.corpus_files()),
+        store or config.REPORT_DIR,
+        "on" if config.USER_SALT else "off (EILAF_USER_SALT unset)",
+    )
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
+    # First, and before anything slow: a missing setting is named in a second
+    # rather than after a minute of model loading, and every gap at once.
+    config.check_wiring()
     if config.IS_DEV:
         # Say it plainly at boot: this mode keeps every conversation, and the
         # only thing telling users is a notice in the welcome message.
@@ -119,6 +148,7 @@ async def lifespan(_app: FastAPI):
     # Load the e5 model + embedding cache once at boot (in a thread so the event
     # loop isn't blocked), not lazily on the first user's message.
     await run_in_threadpool(get_pipeline)
+    _log_wiring()
     yield
     # Uploads the tail of the log that no later record would have pushed out.
     if _log_handler is not None:
@@ -157,8 +187,8 @@ def _verify_signature(request: Request, raw: bytes) -> None:
 
     Leaving ``WHATSAPP_APP_SECRET`` unset disables the check — convenient for
     local/offline testing. Production cannot reach this state: ``EILAF_ENV=prod``
-    makes the secret mandatory at import (see ``config``'s production guards),
-    so the container refuses to boot rather than serve an open webhook.
+    makes the secret mandatory at boot (``config.wiring_problems``), so the
+    container refuses to start rather than serve an open webhook.
     """
     secret = config.APP_SECRET
     if not secret:

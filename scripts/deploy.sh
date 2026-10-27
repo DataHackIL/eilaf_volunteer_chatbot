@@ -107,14 +107,11 @@ remote() { ssh "${SSH_OPTS[@]}" "$TARGET" "$@"; }
 
 echo "deploy: pre-flight"
 
-[ -f .env ] || die ".env not found at the repo root — see app/whatsapp/SETUP.md §1.6"
+[ -f .env ] || die ".env not found at the repo root — copy .env.example to .env and fill it in"
 
-# The shell wins; .env fills in. Only these are read here — everything else in
-# .env reaches the container through compose's env_file, but these are needed at
-# *interpolation* time (see the launch step for why). They are also listed in
-# compose's `environment:` block, which OVERRIDES env_file — so one of them left
-# unexported here would blank the value the container would otherwise have read
-# from .env.
+# The shell wins; .env fills in. Read here only for this script's own
+# pre-flight checks below — the container gets them from .env through compose's
+# env_file, like every other setting.
 while IFS='=' read -r key value; do
     [ -n "${!key:-}" ] || export "$key=$value"
 done < <(grep -E '^EILAF_(REPORT_(BUCKET|REGION)|BEDROCK_(REGION|MODEL)|CORPUS_(S3_URI|REGION))=' .env || true)
@@ -327,14 +324,12 @@ remote "rm -f ~/$REMOTE_DIR/app/whatsapp/docker-compose.override.yml"
 
 # --- 4. build + launch -----------------------------------------------------
 # EILAF_ENV=prod: an internet-reachable host must validate the App-Secret HMAC,
-# so config.py refuses to import without WHATSAPP_APP_SECRET. --force-recreate
+# so the server refuses to boot without WHATSAPP_APP_SECRET. --force-recreate
 # because a plain restart reuses the old container's environment, which would
 # silently keep a rotated secret's predecessor.
 #
-# EILAF_REPORT_* are forwarded explicitly rather than left to the repo-root
-# .env: compose interpolates ${...} in the environment: block from the *shell*,
-# and an interpolated empty string OVERRIDES the same key coming from env_file.
-# Setting the bucket in .env alone would therefore silently do nothing.
+# Only EILAF_ENV goes through the shell: it is this deploy's --env choice, not a
+# .env setting. Everything else reaches the container from .env via env_file.
 
 #
 # Only the chatbot is recreated. The quick tunnel earns a NEW random hostname
@@ -345,13 +340,7 @@ remote "rm -f ~/$REMOTE_DIR/app/whatsapp/docker-compose.override.yml"
 # container on its own; it never needs to know a deploy happened.
 # --recreate-tunnel when you actually mean to change the tunnel itself.
 
-COMPOSE_ENV="EILAF_ENV=$DEPLOY_ENV \
-    EILAF_REPORT_BUCKET='${EILAF_REPORT_BUCKET:-}' \
-    EILAF_REPORT_REGION='${EILAF_REPORT_REGION:-}' \
-    EILAF_BEDROCK_REGION='${EILAF_BEDROCK_REGION:-}' \
-    EILAF_BEDROCK_MODEL='${EILAF_BEDROCK_MODEL:-}' \
-    EILAF_CORPUS_S3_URI='${EILAF_CORPUS_S3_URI:-}' \
-    EILAF_CORPUS_REGION='${EILAF_CORPUS_REGION:-}'"
+COMPOSE_ENV="EILAF_ENV=$DEPLOY_ENV"
 
 if [ "$RECREATE_TUNNEL" -eq 1 ]; then
     echo "deploy: building and starting the stack (tunnel included)"

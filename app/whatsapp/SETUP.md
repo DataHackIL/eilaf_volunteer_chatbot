@@ -99,15 +99,16 @@ the code sent to that phone. Use that phone to chat with the bot.
 > this interim setup.
 
 ### 1.6 Fill in `.env`
-In the repo root `.env` (alongside `GEMINI_API_KEY`):
+From the repo root:
 
-```dotenv
-WHATSAPP_ACCESS_TOKEN=EAAG...           # from 1.2 or 1.4
-WHATSAPP_PHONE_NUMBER_ID=123456789012345
-WHATSAPP_VERIFY_TOKEN=pick-any-string-here
-WHATSAPP_APP_SECRET=your_app_secret
-# GEMINI_API_KEY=...                     # already present — the answer engine
+```bash
+cp .env.example .env
 ```
+
+and fill in its **REQUIRED** block: the values from 1.2–1.3, a verify token you
+make up, and a `GEMINI_API_KEY`. Every other setting is listed there too, with
+what it does and where to get it. The server checks the required ones at boot
+and names every missing one, so a gap fails loudly instead of answering nothing.
 
 ---
 
@@ -207,9 +208,9 @@ and `dev`. The value is normalised, so `DEV` and `Prod` work as written.
 `WHATSAPP_APP_SECRET` is what stops anyone but Meta posting to your webhook, and
 the check is *skipped* when the secret is empty — fine offline, an open webhook
 on a public host. Set `EILAF_ENV=prod` on anything internet-reachable and the
-secret becomes mandatory: `app/whatsapp/config.py` raises at import, before
-uvicorn binds, so a missing or botched secret crash-loops the container visibly
-instead of quietly serving unauthenticated traffic.
+secret becomes mandatory: the server refuses to boot without it, before it
+serves anything, so a missing or botched secret crash-loops the container
+visibly instead of quietly serving unauthenticated traffic.
 
 ```bash
 EILAF_ENV=prod docker compose up -d
@@ -268,12 +269,6 @@ which is bind-mounted on the host — so the capture survives a deploy and can b
 pulled off with `scp`/`rsync`. That is the stopgap until the bucket is wired up,
 not the destination.
 
-> `EILAF_REPORT_BUCKET` must be set in the **shell** that runs `docker compose`,
-> not only in `.env`. Compose interpolates `${...}` in the `environment:` block
-> from the shell, and an interpolated empty string *overrides* the same key
-> arriving via `env_file`. `deploy.sh` forwards it (reading `.env` when the
-> shell has not set it) for exactly this reason.
-
 ### Reported conversations (`EILAF_REPORT_BUCKET`)
 
 A user can ask us to keep their conversation: they type the report phrase
@@ -327,7 +322,7 @@ default is deliberately empty, so a dev run never uploads by accident.
 Why it is mandatory in prod: without one, the fallback writes *inside the
 container*, which the next `docker compose up --force-recreate` deletes. The
 save reports success, the user is told their report was kept, and it is gone —
-so `config.py` raises at import instead, like the app secret.
+so the server refuses to boot instead, like the app secret.
 
 **Bucket checklist** — worth confirming on `eilaf-dev-chatbot-logs`, since these
 are conversations with victims of violence:
@@ -376,8 +371,8 @@ the bot forget everyone.
 
 The Bedrock head generates answers with the same Claude model as the `claude`
 engine, but on this AWS account — so it needs **no API key**, only the instance
-role plus a region. Three separate things gate it, and all three are easy to
-mistake for each other:
+role plus a region. Select it with `EILAF_GENERATOR=bedrock` in `.env`. Three
+separate things gate it, and all three are easy to mistake for each other:
 
 **1. Model access** — Bedrock console → *Model access* → enable the Anthropic
 models. Per-account **and per-region**, and entirely separate from IAM: without

@@ -3,15 +3,21 @@
 #   cd app/whatsapp && docker compose up --build
 #   docker compose logs tunnel          # copy the https://…trycloudflare.com URL
 #
-# Put that URL + "/webhook" into the Meta webhook config (see SETUP.md). Secrets
-# come from the repo-root .env at runtime — nothing is baked into the image.
+# Put that URL + "/webhook" into the Meta webhook config. Settings come from the
+# repo-root .env at runtime (copy .env.example) — nothing is baked into the image.
 
 services:
   chatbot:
     build:
       context: ../..                    # repo root (relative to this file's dir)
       dockerfile: app/whatsapp/Dockerfile
-    env_file: ../../.env                # repo-root .env → WHATSAPP_* / GEMINI_API_KEY
+    # Every setting comes from the repo-root .env, delivered whole by env_file.
+    # .env.example lists them all, with where to get each one.
+    env_file: ../../.env
+    # Only per-run knobs belong here, set from the shell on the command line
+    # (e.g. `EILAF_ENV=prod docker compose up -d`). Anything listed here
+    # OVERRIDES the same key from .env — left unset in the shell, it becomes an
+    # empty string that blanks it — so do not add a .env setting to this block.
     environment:
       # The entrypoint can rebuild the corpus before the server starts
       # (scrape → enrich → embed, see app/whatsapp/entrypoint.sh). It is OFF by
@@ -22,62 +28,21 @@ services:
       # — on a freshly built image, and expect a long first boot (the LLM
       # enrichment pass is unbudgeted; cap it with ENRICH_LIMIT).
       SKIP_DATA_CURATION: "${SKIP_DATA_CURATION:-1}"
+      ENRICH_PROVIDER: "${ENRICH_PROVIDER:-gemini}"
+      ENRICH_LIMIT: "${ENRICH_LIMIT:-}"
       # "prod" on any internet-reachable host: it makes WHATSAPP_APP_SECRET and
-      # EILAF_REPORT_BUCKET mandatory, so a missing/botched value crash-loops
-      # the container instead of quietly serving an unauthenticated webhook or
-      # writing reports into a directory the next deploy deletes.
+      # EILAF_REPORT_BUCKET mandatory, so a missing/botched value stops the boot
+      # instead of quietly serving an unauthenticated webhook or writing reports
+      # into a directory the next deploy deletes.
       #
       # "dev" is the test deployment: EVERY conversation and the service's own
       # log are saved to the store, and the welcome message tells the user so in
       # their language before they type anything. Not for real traffic — people
       # reach this bot after a violent event, and the notice is only informed
       # consent if whoever set this meant it to be read.
+      #
+      # A choice per deployment, so the shell sets it (scripts/deploy.sh --env).
       EILAF_ENV: "${EILAF_ENV:-}"
-      ENRICH_PROVIDER: "${ENRICH_PROVIDER:-gemini}"
-      ENRICH_LIMIT: "${ENRICH_LIMIT:-}"
-      # Where the corpus lives *inside the container*. Empty falls back to the
-      # repo-local data/static, which is what the bind mount below fills. Point
-      # it at another mount (an EC2 volume, or S3 via mountpoint-s3) to move the
-      # whole store — raw/, enriched/ and .embeddings/ follow it together.
-      EILAF_STATIC_DIR: "${EILAF_STATIC_DIR:-}"
-      # Pull the corpus from S3 into the store above before the server starts,
-      # e.g. s3://eilaf-dev-chatbot-logs/model/data/. Content-compared, so a
-      # boot onto an up-to-date copy downloads nothing. Empty skips the pull.
-      # The instance role needs s3:GetObject on the prefix and s3:ListBucket on
-      # the bucket. Region falls back to EILAF_REPORT_REGION (same bucket).
-      EILAF_CORPUS_S3_URI: "${EILAF_CORPUS_S3_URI:-}"
-      EILAF_CORPUS_REGION: "${EILAF_CORPUS_REGION:-}"
-      # "1" restores the old fact-collecting turns (event → gender → age before
-      # answering). Off by default: the corpus has almost no age/gender/locality
-      # tags, so the answers changed nothing and only delayed the reply.
-      WHATSAPP_COLLECT_FACTS: "${WHATSAPP_COLLECT_FACTS:-}"
-      # Where a conversation goes once the user asked us to keep it and tapped
-      # Approve. The bucket is MANDATORY under EILAF_ENV=prod: without it the
-      # store falls back to a directory inside the container, which the next
-      # --force-recreate deletes, losing reports we told the user we had kept.
-      # No AWS key here or in .env — boto3 takes the EC2 instance role, which
-      # needs only s3:PutObject on the prefix (see SETUP.md).
-      EILAF_REPORT_BUCKET: "${EILAF_REPORT_BUCKET:-}"
-      EILAF_REPORT_PREFIX: "${EILAF_REPORT_PREFIX:-conversations/}"
-      # Empty lets boto3 resolve the region itself (instance metadata); set it
-      # when the bucket is not in the instance's own region.
-      EILAF_REPORT_REGION: "${EILAF_REPORT_REGION:-}"
-      # Returning-user recognition: the HMAC salt is a secret, so it comes from
-      # .env via env_file (not listed here, where an empty shell value would
-      # override it). The database path rarely needs changing.
-      EILAF_USER_DB: "${EILAF_USER_DB:-}"
-      # Which region answers are generated in when the Bedrock head is selected.
-      # Independent of the report region above — the bucket and the model need
-      # not live together. No AWS key here either: the Anthropic Bedrock client
-      # is built with a region only, so botocore takes the EC2 instance role,
-      # which needs bedrock:InvokeModel (see SETUP.md). Unset leaves the head
-      # inert; it deliberately does NOT default to a region, because botocore
-      # would silently pick us-east-1 and move conversations out of the EU.
-      EILAF_BEDROCK_REGION: "${EILAF_BEDROCK_REGION:-}"
-      # Pins the Bedrock model id. Empty derives it from the region (e.g.
-      # eu.anthropic.claude-sonnet-5); set it when the account is served a
-      # different id than `aws bedrock list-inference-profiles` reports.
-      EILAF_BEDROCK_MODEL: "${EILAF_BEDROCK_MODEL:-}"
     ports:
       - "8000:8000"
     volumes:

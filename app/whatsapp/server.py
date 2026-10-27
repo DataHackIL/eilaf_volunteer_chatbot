@@ -46,6 +46,11 @@ logging.basicConfig(
     format="%(levelname)s:     %(name)s: %(message)s",
 )
 logger = logging.getLogger("whatsapp")
+# httpx logs every request URL at INFO, and the boot check's debug_token call
+# carries the access token and the app secret in its query string — so at INFO
+# both land in the log, which EILAF_ENV=dev also uploads to the store. Its
+# failures still surface: they are raised to the caller, not logged here.
+logging.getLogger("httpx").setLevel(logging.WARNING)
 
 # Under EILAF_ENV=dev only, a second handler copies the log to the store, so it
 # outlives the container that `--force-recreate` replaces. Installed here rather

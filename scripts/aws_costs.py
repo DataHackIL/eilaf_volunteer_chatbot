@@ -181,7 +181,11 @@ def window_bounds(since: str | None, month: str | None) -> tuple[str, str, str]:
     # A --month older than the window would report an empty bucket as $0.00,
     # which reads as "nothing spent" rather than "not asked for".
     start = min(start, focus)
-    return start.isoformat(), (today + dt.timedelta(days=1)).isoformat(), focus.strftime("%Y-%m")
+    return (
+        start.isoformat(),
+        (today + dt.timedelta(days=1)).isoformat(),
+        focus.strftime("%Y-%m"),
+    )
 
 
 Costs = dict[str, dict[str, float]]
@@ -218,7 +222,14 @@ def fetch_costs(
     filters = list(scope_filters or [])
     if not with_credits:
         filters.append(
-            {"Not": {"Dimensions": {"Key": "RECORD_TYPE", "Values": sorted(CREDIT_RECORDS)}}}
+            {
+                "Not": {
+                    "Dimensions": {
+                        "Key": "RECORD_TYPE",
+                        "Values": sorted(CREDIT_RECORDS),
+                    }
+                }
+            }
         )
     pages = []
     try:
@@ -239,7 +250,9 @@ def fetch_costs(
             # "And" is only legal with two or more expressions, hence the
             # single-element special case.
             if filters:
-                request["Filter"] = filters[0] if len(filters) == 1 else {"And": filters}
+                request["Filter"] = (
+                    filters[0] if len(filters) == 1 else {"And": filters}
+                )
             if token:
                 request["NextPageToken"] = token
             response = client.get_cost_and_usage(**request)
@@ -393,7 +406,17 @@ def append_snapshot(
             writer.writerow(CSV_COLUMNS)
         for service, bm, lm, bd, ld, delta in rows:
             writer.writerow(
-                [snapshot, scope, month, service, cell(bm), cell(lm), cell(bd), cell(ld), cell(delta)]
+                [
+                    snapshot,
+                    scope,
+                    month,
+                    service,
+                    cell(bm),
+                    cell(lm),
+                    cell(bd),
+                    cell(ld),
+                    cell(delta),
+                ]
             )
         writer.writerow(
             [
@@ -509,9 +532,13 @@ def print_table(
         f" 2026-09-12); 'legacy' is\neverything else in scope."
     )
     if with_credits:
-        print("Credits and refunds are netted in: this is what is charged, not what it costs.")
+        print(
+            "Credits and refunds are netted in: this is what is charged, not what it costs."
+        )
     else:
-        print("Credit and Refund records are excluded; --with-credits nets them back in.")
+        print(
+            "Credit and Refund records are excluded; --with-credits nets them back in."
+        )
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -530,19 +557,28 @@ def main(argv: list[str] | None = None) -> int:
         default=ALERT_THRESHOLD_USD,
         help=f"alert above this month-to-date total in USD (default: {ALERT_THRESHOLD_USD:.2f}, or $EILAF_COST_ALERT_USD)",
     )
-    parser.add_argument("--month", help="YYYY-MM to report instead of the current month")
+    parser.add_argument(
+        "--month", help="YYYY-MM to report instead of the current month"
+    )
     parser.add_argument(
         "--since",
         help=f"YYYY-MM the to-date column reaches back to (default: {DEFAULT_LOOKBACK_MONTHS} months)",
     )
     parser.add_argument(
-        "--csv", type=Path, default=DEFAULT_CSV, help=f"CSV to append to (default: {DEFAULT_CSV})"
+        "--csv",
+        type=Path,
+        default=DEFAULT_CSV,
+        help=f"CSV to append to (default: {DEFAULT_CSV})",
     )
     parser.add_argument(
-        "--no-write", action="store_true", help="print the table without recording a snapshot"
+        "--no-write",
+        action="store_true",
+        help="print the table without recording a snapshot",
     )
     parser.add_argument(
-        "--all", action="store_true", help="include services costing nothing in either column"
+        "--all",
+        action="store_true",
+        help="include services costing nothing in either column",
     )
     parser.add_argument(
         "--region",
@@ -568,7 +604,9 @@ def main(argv: list[str] | None = None) -> int:
         scope_parts.append(f"region={args.region}")
     if args.tag:
         if "=" not in args.tag:
-            raise SystemExit("aws_costs: --tag wants KEY=VALUE, e.g. Project=eilaf-chatbot")
+            raise SystemExit(
+                "aws_costs: --tag wants KEY=VALUE, e.g. Project=eilaf-chatbot"
+            )
         key, value = args.tag.split("=", 1)
         scope_filters.append({"Tags": {"Key": key, "Values": [value]}})
         scope_parts.append(f"tag:{key}={value}")
@@ -588,7 +626,9 @@ def main(argv: list[str] | None = None) -> int:
     # The history is kept on one basis only, so a --with-credits run has nothing
     # legitimate to compare against: diffing netted figures against recorded
     # actual ones reports a change the size of the credit balance.
-    since, before = ("", {}) if args.with_credits else previous_snapshot(args.csv, scope)
+    since, before = (
+        ("", {}) if args.with_credits else previous_snapshot(args.csv, scope)
+    )
     # A stamp with no per-service figures behind it is not a baseline either: a
     # file kept on older columns has exactly that shape, and diffing against
     # nothing would report the whole history as this run's change. Better to say
@@ -630,8 +670,15 @@ def main(argv: list[str] | None = None) -> int:
     bot_date = clamp(sum(bot_to_date.values()))
     leg_date = clamp(sum(leg_to_date.values()))
     month_total = clamp(bot_month + leg_month)
-    totals = (bot_month, leg_month, bot_date, leg_date,
-              None if not since else clamp((bot_date + leg_date) - clamp(sum(before.values()))))
+    totals = (
+        bot_month,
+        leg_month,
+        bot_date,
+        leg_date,
+        None
+        if not since
+        else clamp((bot_date + leg_date) - clamp(sum(before.values()))),
+    )
     print_table(rows, totals, month, start, since, args.with_credits, scope)
     # An empty narrowed answer is ambiguous in a way the whole-account one is
     # not: a tag that is not activated yet, or activated after the usage, looks

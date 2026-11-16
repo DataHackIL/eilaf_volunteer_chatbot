@@ -51,7 +51,9 @@ class BM25Reranker(Reranker):
         self.b = b
         texts = [d.text if isinstance(d, Document) else d for d in corpus]
         self._doc_tf: list[Counter[str]] = [Counter(_tokenize(t)) for t in texts]
-        self._doc_len = np.array([sum(tf.values()) for tf in self._doc_tf], dtype=np.float64)
+        self._doc_len = np.array(
+            [sum(tf.values()) for tf in self._doc_tf], dtype=np.float64
+        )
         n_docs = len(self._doc_tf)
         self._avgdl = float(self._doc_len.mean()) if n_docs else 0.0
         # Document frequency per term, then the (always non-negative) BM25 idf.
@@ -59,7 +61,8 @@ class BM25Reranker(Reranker):
         for tf in self._doc_tf:
             df.update(tf.keys())
         self._idf: dict[str, float] = {
-            term: np.log(1 + (n_docs - freq + 0.5) / (freq + 0.5)) for term, freq in df.items()
+            term: np.log(1 + (n_docs - freq + 0.5) / (freq + 0.5))
+            for term, freq in df.items()
         }
 
     def _bm25(self, terms: Sequence[str], tf: Counter[str], dl: float) -> float:

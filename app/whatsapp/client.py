@@ -7,10 +7,9 @@ direction (user → business) arrives as webhooks handled in ``server.py``.
 
 from __future__ import annotations
 
+import time
 from collections.abc import Sequence
 from dataclasses import dataclass
-
-import time
 
 import httpx
 

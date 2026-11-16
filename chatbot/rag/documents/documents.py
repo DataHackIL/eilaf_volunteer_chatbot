@@ -202,7 +202,9 @@ def _node_meta(node: dict, parent_meta: dict) -> dict:
     meta = dict(parent_meta)
     node_meta = node.get("meta")
     if isinstance(node_meta, dict):
-        meta.update({key: value for key, value in node_meta.items() if value is not None})
+        meta.update(
+            {key: value for key, value in node_meta.items() if value is not None}
+        )
     return meta
 
 
@@ -333,7 +335,11 @@ def _flatten_json_tree(
     # cites whatever the root cites (the page), as do packs of top-level nodes.
     root_source = data.get("source")
     emit(
-        data.get("lead", ""), [title], root_meta, id=f"{source}#lead", parent_id=None,
+        data.get("lead", ""),
+        [title],
+        root_meta,
+        id=f"{source}#lead",
+        parent_id=None,
         citations=root_source,
     )
 
@@ -358,7 +364,11 @@ def _flatten_json_tree(
             nonlocal pack_id
             if pack:
                 emit(
-                    "\n".join(pack), crumbs, meta, pack_id, parent_id,
+                    "\n".join(pack),
+                    crumbs,
+                    meta,
+                    pack_id,
+                    parent_id,
                     _covering_citations(parent_source, pack_citations),
                 )
                 pack.clear()
@@ -389,7 +399,11 @@ def _flatten_json_tree(
                 # A small *subtree* (a whole sub-section that fits): roll it up
                 # into one Document instead of one-per-descendant-clause.
                 emit(
-                    merged, child_crumbs, node_meta, node_id(path), parent_id,
+                    merged,
+                    child_crumbs,
+                    node_meta,
+                    node_id(path),
+                    parent_id,
                     _covering_citations(node.get("source"), subtree_citations(node)),
                 )
                 continue  # subtree consumed — don't also recurse into it
@@ -398,10 +412,20 @@ def _flatten_json_tree(
             # meaningless lines); a missing flag (un-enriched) keeps the node.
             if node.get("useful", True):
                 emit(
-                    node.get("text", ""), child_crumbs, node_meta, node_id(path),
-                    parent_id, node.get("source"),
+                    node.get("text", ""),
+                    child_crumbs,
+                    node_meta,
+                    node_id(path),
+                    parent_id,
+                    node.get("source"),
                 )
-            walk(node.get("children", []), child_crumbs, node_meta, path, node.get("source"))
+            walk(
+                node.get("children", []),
+                child_crumbs,
+                node_meta,
+                path,
+                node.get("source"),
+            )
         flush()  # emit any leaves buffered at the end of the sibling list
 
     walk(data.get("children", []), [title], root_meta, (), root_source)

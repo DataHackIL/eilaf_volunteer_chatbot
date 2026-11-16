@@ -20,10 +20,14 @@ _DEFAULT_STATIC = Path(__file__).resolve().parents[1] / "static"
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="python -m data.corpus_sync", description=__doc__)
+    parser = argparse.ArgumentParser(
+        prog="python -m data.corpus_sync", description=__doc__
+    )
     parser.add_argument("uri", nargs="?", default=os.environ.get("EILAF_CORPUS_S3_URI"))
     parser.add_argument(
-        "--dest", type=Path, default=Path(os.environ.get("EILAF_STATIC_DIR") or _DEFAULT_STATIC)
+        "--dest",
+        type=Path,
+        default=Path(os.environ.get("EILAF_STATIC_DIR") or _DEFAULT_STATIC),
     )
     args = parser.parse_args(argv)
     if not args.uri:
@@ -33,7 +37,11 @@ def main(argv: list[str] | None = None) -> int:
     # does not read it from instance metadata and falls back to us-east-1, which
     # against an eu-north-1 bucket fails as PermanentRedirect. The corpus shares
     # the reports bucket, so its region is the default.
-    region = os.environ.get("EILAF_CORPUS_REGION") or os.environ.get("EILAF_REPORT_REGION") or None
+    region = (
+        os.environ.get("EILAF_CORPUS_REGION")
+        or os.environ.get("EILAF_REPORT_REGION")
+        or None
+    )
     client = boto3.client("s3", region_name=region)
 
     result = pull_corpus(client, args.uri, args.dest)

@@ -31,12 +31,12 @@ _SYSTEM = (
     "benefits information on its own; true otherwise.\n"
     "- min_age / max_age: the age range the segment restricts eligibility to, if "
     "it states one; null if it applies to any age.\n"
-    "- gender: \"m\" or \"f\" if eligibility is restricted to that gender; null "
+    '- gender: "m" or "f" if eligibility is restricted to that gender; null '
     "if it applies to anyone.\n"
     "- track: the separate compensation track the segment is about, when it is "
-    "about one — \"hostile_acts\" (נפגעי פעולות איבה / terror), \"military\" "
-    "(נפגעי צה\"ל, משפחות שכולות), \"road_accident\" (תאונת דרכים, פלת\"ד), "
-    "\"work_accident\" (תאונת עבודה, נפגעי עבודה). These are routed by separate "
+    'about one — "hostile_acts" (נפגעי פעולות איבה / terror), "military" '
+    '(נפגעי צה"ל, משפחות שכולות), "road_accident" (תאונת דרכים, פלת"ד), '
+    '"work_accident" (תאונת עבודה, נפגעי עבודה). These are routed by separate '
     "laws and paying authorities, so their entitlements do not carry over to a "
     "victim of ordinary criminal violence. Use null when the segment is about "
     "crime victims generally rather than one of these tracks.\n"

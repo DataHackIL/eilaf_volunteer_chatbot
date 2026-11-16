@@ -13,10 +13,9 @@ from collections.abc import Sequence
 from pathlib import Path
 
 import numpy as np
-
-from chatbot.rag.embedder.base import Embedder
 from sentence_transformers import SentenceTransformer
 
+from chatbot.rag.embedder.base import Embedder
 
 DEFAULT_MODEL = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
 

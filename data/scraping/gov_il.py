@@ -136,7 +136,7 @@ def _fold_barren_headings(node: dict) -> None:
         if child["text"] or child["children"]:
             kept.append(child)
         elif child["heading"]:
-            node["text"] = f'{node["text"]}\n{child["heading"]}'.strip()
+            node["text"] = f"{node['text']}\n{child['heading']}".strip()
     node["children"] = kept
 
 
@@ -197,7 +197,9 @@ class GovILScraper(BaseHTMLScraper):
         first = _get(url, culture=culture)
         chapters = [first]
 
-        nav = ((first.get("contentMain") or {}).get("sideNav") or {}).get("tagItems") or []
+        nav = ((first.get("contentMain") or {}).get("sideNav") or {}).get(
+            "tagItems"
+        ) or []
         for item in nav[1:]:
             index = parse_qs(urlsplit(item.get("url", "")).query).get("chapterIndex")
             if index:
@@ -224,7 +226,9 @@ class GovILScraper(BaseHTMLScraper):
         page_citation = ", ".join(filter(None, ("gov.il", root["title"])))
         cite(root, page_citation, self.target_url)
 
-        nav = ((chapters[0].get("contentMain") or {}).get("sideNav") or {}).get("tagItems") or []
+        nav = ((chapters[0].get("contentMain") or {}).get("sideNav") or {}).get(
+            "tagItems"
+        ) or []
         for index, payload in enumerate(chapters):
             # A single-chapter page has no chapter nav; it still gets a wrapper
             # node, with an empty heading that the loader drops from the
@@ -235,7 +239,9 @@ class GovILScraper(BaseHTMLScraper):
             _fold_barren_headings(chapter)
             if chapter["text"] or chapter["children"]:
                 index_param = (
-                    parse_qs(urlsplit(nav[index].get("url", "")).query).get("chapterIndex")
+                    parse_qs(urlsplit(nav[index].get("url", "")).query).get(
+                        "chapterIndex"
+                    )
                     if 0 < index < len(nav)
                     else None
                 )
@@ -254,7 +260,9 @@ class GovILScraper(BaseHTMLScraper):
         Prose and Q&A blocks interleave on the page, ordered by their shared
         ``order`` field, so they are merged on it rather than concatenated.
         """
-        blocks = [("html", b.get("order", 0), b) for b in main.get("htmlContents") or []]
+        blocks = [
+            ("html", b.get("order", 0), b) for b in main.get("htmlContents") or []
+        ]
         blocks += [("faq", b.get("order", 0), b) for b in main.get("faqs") or []]
 
         # Open heading levels, deepest last; the chapter sits below every real
@@ -292,7 +300,7 @@ class GovILScraper(BaseHTMLScraper):
             if not text:
                 continue
             node = stack[-1][1]
-            node["text"] = f'{node["text"]}\n{text}'.strip()
+            node["text"] = f"{node['text']}\n{text}".strip()
 
     @staticmethod
     def _fill_faq(chapter: dict, section: dict) -> None:
@@ -305,19 +313,23 @@ class GovILScraper(BaseHTMLScraper):
                 filter(None, (_text(el) for el in answer.find_all(recursive=False)))
             )
             if text:
-                children.append({
-                    "heading": (item.get("headTitle") or "").strip(),
-                    "level": 3,
-                    "text": text,
-                    "children": [],
-                })
+                children.append(
+                    {
+                        "heading": (item.get("headTitle") or "").strip(),
+                        "level": 3,
+                        "text": text,
+                        "children": [],
+                    }
+                )
         if children:
-            chapter["children"].append({
-                "heading": (section.get("headTitle") or "").strip() or _FAQ_HEADING,
-                "level": 2,
-                "text": "",
-                "children": children,
-            })
+            chapter["children"].append(
+                {
+                    "heading": (section.get("headTitle") or "").strip() or _FAQ_HEADING,
+                    "level": 2,
+                    "text": "",
+                    "children": children,
+                }
+            )
 
     def format(self, content: str) -> str:
         """Return the reconstructed section tree as indented JSON."""
@@ -339,7 +351,9 @@ def list_pages(landing_url: str, tab: str = PAGES_TAB) -> list[str]:
     kind = next((seg for seg in segments if seg in LANDING_KINDS), "offices")
     landing = _get(LANDING_API.format(culture=culture, kind=kind, slug=segments[-1]))
 
-    tabs = ((landing.get("loadingTabsStrip") or {}).get("stripModel") or {}).get("items") or []
+    tabs = ((landing.get("loadingTabsStrip") or {}).get("stripModel") or {}).get(
+        "items"
+    ) or []
     urls = []
     for item in tabs:
         source = item.get("sourceUrl") or ""
@@ -358,7 +372,7 @@ def list_pages(landing_url: str, tab: str = PAGES_TAB) -> list[str]:
 # Pages about crime victims generally — they apply to this bot's population as
 # written, so they carry no track.
 _GENERAL = (
-    "nifgaey-avera",            # rights, criminal-process stages, support services
+    "nifgaey-avera",  # rights, criminal-process stages, support services
     "guide-victims-of-killing",  # the סנ"ה programme for families of killing victims
 )
 

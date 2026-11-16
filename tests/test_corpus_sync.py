@@ -64,7 +64,11 @@ OBJECTS = {
 def test_first_pull_downloads_everything_then_nothing(tmp_path):
     s3 = FakeS3(OBJECTS)
     first = pull_corpus(s3, URI, tmp_path)
-    assert sorted(first.downloaded) == [".embeddings/embeddings.npy", "enriched/a.json", "raw/a.json"]
+    assert sorted(first.downloaded) == [
+        ".embeddings/embeddings.npy",
+        "enriched/a.json",
+        "raw/a.json",
+    ]
     assert (tmp_path / "raw/a.json").read_bytes() == b'{"a": 1}'
 
     s3.downloads.clear()

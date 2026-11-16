@@ -45,7 +45,10 @@ def _pipeline(monkeypatch, ranked_ids: list[str], top_k: int = 2) -> RAGPipeline
     def fake_cosine(matrix, vector):
         # Higher score = earlier in ranked_ids; unranked docs score lowest.
         return np.array(
-            [len(ranked_ids) - order.get(d.id, len(ranked_ids)) for d in pipe.documents],
+            [
+                len(ranked_ids) - order.get(d.id, len(ranked_ids))
+                for d in pipe.documents
+            ],
             dtype=np.float64,
         )
 
@@ -126,7 +129,8 @@ def test_siblings_ranked_nearest_first_and_capped(monkeypatch):
     ranking = ["c.json#0/0", "c.json#0/3", "c.json#0/1", "c.json#0/2"]
     order = {doc_id: rank for rank, doc_id in enumerate(ranking)}
     monkeypatch.setattr(
-        pipe, "_cosine",
+        pipe,
+        "_cosine",
         lambda m, v: np.array(
             [len(ranking) - order.get(d.id, len(ranking)) for d in pipe.documents],
             dtype=np.float64,
@@ -154,7 +158,9 @@ class _FixedEmbedder(Embedder):
     def encode(self, texts):  # noqa: D102
         # Corpus docs (embedded at construction) aren't under test here, so any
         # unknown text maps to a zero vector of the right width.
-        return np.stack([self._vectors.get(t, np.zeros(self._dim, np.float32)) for t in texts])
+        return np.stack(
+            [self._vectors.get(t, np.zeros(self._dim, np.float32)) for t in texts]
+        )
 
 
 def _blend_pipeline(context_weight: float) -> RAGPipeline:

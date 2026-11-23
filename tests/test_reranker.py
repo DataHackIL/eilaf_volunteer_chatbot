@@ -61,9 +61,7 @@ def test_reranker_reorders_embedder_candidates(monkeypatch):
     # becomes the single top match.
     pipe = _pipeline_with_reranker(BM25Reranker(_CORPUS))
     # Force the embedder shortlist to include all docs with d3 on top.
-    monkeypatch.setattr(
-        pipe, "_cosine", lambda m, v: np.array([0.1, 0.2, 0.3, 0.9])
-    )
+    monkeypatch.setattr(pipe, "_cosine", lambda m, v: np.array([0.1, 0.2, 0.3, 0.9]))
     matches = pipe.matches("נפגעי עבירה זכויות")
     assert [d.id for d in matches] == ["d0"]
 

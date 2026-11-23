@@ -167,7 +167,9 @@ def main() -> None:
             # must not be able to keep calling past --limit.
             remaining -= sent
             if remaining <= 0:
-                print(f"--limit reached; {total_pending - annotated}+ segments deferred.")
+                print(
+                    f"--limit reached; {total_pending - annotated}+ segments deferred."
+                )
                 break
 
     if args.dry_run:

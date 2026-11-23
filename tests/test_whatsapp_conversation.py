@@ -56,7 +56,9 @@ class _FakePipeline:
                 text="clause",
                 source="benefits.json",
                 id="benefits.json#0",
-                citations=[{"text": "Benefits guide", "url": "https://example.org/benefits"}],
+                citations=[
+                    {"text": "Benefits guide", "url": "https://example.org/benefits"}
+                ],
             )
         ]
 
@@ -200,8 +202,14 @@ def test_show_sources_on_an_older_answer_shows_its_own(fake_pipeline, monkeypatc
     )
     conversation.handle_message(wa, text="second?")
 
-    assert "Benefits guide" in conversation.handle_message(wa, button_id="sources:1")[0].body
-    assert "Second source" in conversation.handle_message(wa, button_id="sources:2")[0].body
+    assert (
+        "Benefits guide"
+        in conversation.handle_message(wa, button_id="sources:1")[0].body
+    )
+    assert (
+        "Second source"
+        in conversation.handle_message(wa, button_id="sources:2")[0].body
+    )
 
 
 def test_show_sources_after_they_are_gone(fake_pipeline):
@@ -244,7 +252,9 @@ def test_a_new_user_gets_the_full_welcome_and_is_remembered(fake_pipeline, user_
     assert record is not None and record.language == "en"
 
 
-def test_a_returning_user_gets_welcome_back_in_their_language(fake_pipeline, user_store):
+def test_a_returning_user_gets_welcome_back_in_their_language(
+    fake_pipeline, user_store
+):
     wa = "972500000101"
     user_store.touch(user_key(wa, "pepper"), "ar", "2026-10-01")
     conversation.reset(wa)
@@ -283,7 +293,9 @@ def test_the_record_holds_no_phone_number(fake_pipeline, user_store):
     assert wa.encode() not in user_store.path.read_bytes()
 
 
-def test_a_broken_user_store_does_not_break_the_conversation(fake_pipeline, monkeypatch):
+def test_a_broken_user_store_does_not_break_the_conversation(
+    fake_pipeline, monkeypatch
+):
     class Broken:
         def get(self, key):
             raise OSError("disk gone")
@@ -548,10 +560,14 @@ def webhook_client(monkeypatch):
     monkeypatch.setattr(server.config, "VERIFY_TOKEN", "verify-me")
     monkeypatch.setattr(server.config, "APP_SECRET", "")  # skip signature in tests
     sent: list = []
-    monkeypatch.setattr(server, "_send", lambda wa_id, reply: sent.append((wa_id, reply)))
+    monkeypatch.setattr(
+        server, "_send", lambda wa_id, reply: sent.append((wa_id, reply))
+    )
     # The typing indicator lands in the same list, so tests can check ordering.
     monkeypatch.setattr(
-        server.client, "show_typing", lambda message_id: sent.append(("typing", message_id))
+        server.client,
+        "show_typing",
+        lambda message_id: sent.append(("typing", message_id)),
     )
     with TestClient(server.app) as client:
         yield client, sent
@@ -575,7 +591,11 @@ def test_webhook_verification_rejects_bad_token(webhook_client):
     client, _ = webhook_client
     resp = client.get(
         "/webhook",
-        params={"hub.mode": "subscribe", "hub.verify_token": "wrong", "hub.challenge": "x"},
+        params={
+            "hub.mode": "subscribe",
+            "hub.verify_token": "wrong",
+            "hub.challenge": "x",
+        },
     )
     assert resp.status_code == 403
 
@@ -592,7 +612,11 @@ def test_webhook_dispatches_inbound_text(webhook_client):
                         "field": "messages",
                         "value": {
                             "messages": [
-                                {"from": "972500000000", "type": "text", "text": {"body": "hi"}}
+                                {
+                                    "from": "972500000000",
+                                    "type": "text",
+                                    "text": {"body": "hi"},
+                                }
                             ]
                         },
                     }
@@ -610,7 +634,9 @@ def test_webhook_dispatches_inbound_text(webhook_client):
 
 def test_webhook_ignores_status_callbacks(webhook_client):
     client, sent = webhook_client
-    payload = {"entry": [{"changes": [{"value": {"statuses": [{"status": "delivered"}]}}]}]}
+    payload = {
+        "entry": [{"changes": [{"value": {"statuses": [{"status": "delivered"}]}}]}]
+    }
     resp = client.post("/webhook", json=payload)
     assert resp.status_code == 200
     assert sent == []
@@ -682,7 +708,9 @@ def test_typing_indicator_shown_before_the_reply(webhook_client):
     conversation.reset(wa)
     client.post(
         "/webhook",
-        json=_inbound({"from": wa, "id": "wamid.X", "type": "text", "text": {"body": "hi"}}),
+        json=_inbound(
+            {"from": wa, "id": "wamid.X", "type": "text", "text": {"body": "hi"}}
+        ),
     )
     assert sent[0] == ("typing", "wamid.X")
     assert sent[1][0] == wa
@@ -698,7 +726,9 @@ def test_typing_indicator_failure_does_not_block_the_reply(webhook_client, monke
     conversation.reset(wa)
     client.post(
         "/webhook",
-        json=_inbound({"from": wa, "id": "wamid.Y", "type": "text", "text": {"body": "hi"}}),
+        json=_inbound(
+            {"from": wa, "id": "wamid.Y", "type": "text", "text": {"body": "hi"}}
+        ),
     )
     assert len(sent) == 1 and sent[0][0] == wa
 
@@ -798,10 +828,14 @@ def test_send_failure_carries_the_graph_api_explanation(monkeypatch):
     is where Meta actually says *why* — an expired token and a recipient missing
     from the test allow-list look identical in the log without it.
     """
-    body = '{"error":{"message":"(#131030) Recipient phone number not in allowed list"}}'
+    body = (
+        '{"error":{"message":"(#131030) Recipient phone number not in allowed list"}}'
+    )
     request = httpx.Request("POST", "https://graph.facebook.com/v21.0/1/messages")
     monkeypatch.setattr(
-        client.httpx, "post", lambda *a, **k: httpx.Response(400, text=body, request=request)
+        client.httpx,
+        "post",
+        lambda *a, **k: httpx.Response(400, text=body, request=request),
     )
     monkeypatch.setattr(client.config, "ACCESS_TOKEN", "t0ken")
     monkeypatch.setattr(client.config, "PHONE_NUMBER_ID", "1")
@@ -987,7 +1021,9 @@ def test_each_language_phrase_restarts(fake_pipeline):
         conversation.handle_message("u-lang", text="what am I entitled to?")
         conversation.handle_message("u-lang", text="what am I entitled to?")
         conversation.handle_message("u-lang", text=phrase)
-        assert conversation._SESSIONS["u-lang"].query == "", f"{phrase!r} did not restart"
+        assert conversation._SESSIONS["u-lang"].query == "", (
+            f"{phrase!r} did not restart"
+        )
 
 
 def test_welcome_tells_the_user_how_to_restart(fake_pipeline):
@@ -1081,7 +1117,9 @@ def test_typed_text_at_the_consent_step_is_not_consent(fake_pipeline, store):
 
         assert store.saved == [], f"{answer!r} wrongly approved a report"
         assert _button_ids(replies[0]) == ["report:approve", "report:cancel"]
-        assert conversation._SESSIONS["u-typed"].step is conversation.Step.REPORT_CONSENT
+        assert (
+            conversation._SESSIONS["u-typed"].step is conversation.Step.REPORT_CONSENT
+        )
 
 
 def test_cancel_saves_nothing_and_returns_to_the_question_step(fake_pipeline, store):
@@ -1247,7 +1285,11 @@ def test_welcome_tells_the_user_how_to_report(fake_pipeline):
 
 @pytest.mark.parametrize(
     "phrase,language",
-    [("report", Language.ENGLISH), ("דיווח", Language.HEBREW), ("تبليغ", Language.ARABIC)],
+    [
+        ("report", Language.ENGLISH),
+        ("דיווח", Language.HEBREW),
+        ("تبليغ", Language.ARABIC),
+    ],
 )
 def test_reporting_as_the_very_first_message_reads_in_that_language(
     fake_pipeline, store, phrase, language
@@ -1322,7 +1364,9 @@ def test_s3_store_key_layout_and_body():
     assert location == f"s3://eilaf-reports/{call['Key']}"
 
 
-@pytest.mark.parametrize("prefix", ["conversations", "conversations/", "/conversations/"])
+@pytest.mark.parametrize(
+    "prefix", ["conversations", "conversations/", "/conversations/"]
+)
 def test_s3_prefix_is_normalised(prefix):
     """Joining a prefix blindly gives "conversations2026/…" or a double slash,
     each of which reads as a different folder in the console."""
@@ -1414,7 +1458,9 @@ def test_correcting_the_language_repeats_the_notice(dev_mode, language):
     the welcome — which is where the notice was."""
     conversation.reset("u-devlang")
     conversation.handle_message("u-devlang", text="hello")
-    replies = conversation.handle_message("u-devlang", button_id=f"lang:{language.value}")
+    replies = conversation.handle_message(
+        "u-devlang", button_id=f"lang:{language.value}"
+    )
     assert TEXTS[language].DEV_NOTICE.value in replies[0].body
 
 
@@ -1470,7 +1516,9 @@ def test_the_dev_autosave_never_breaks_a_conversation(
     conversation.reset("u-devfail")
     conversation.handle_message("u-devfail", text="hello")
     with caplog.at_level(logging.WARNING):
-        replies = conversation.handle_message("u-devfail", text="what am I entitled to?")
+        replies = conversation.handle_message(
+            "u-devfail", text="what am I entitled to?"
+        )
 
     assert "answer[" in replies[0].body
     assert "bucket on fire" in caplog.text

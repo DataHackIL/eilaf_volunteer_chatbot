@@ -79,6 +79,7 @@ def _enricher(client, **kw) -> BedrockSegmentEnricher:
 
 # --- configuration --------------------------------------------------------
 
+
 def test_construction_is_inert_and_enrich_demands_a_region():
     enricher = BedrockSegmentEnricher()
     assert enricher._client is None
@@ -100,6 +101,7 @@ def test_pinned_model_needs_no_region(monkeypatch):
 
 
 # --- the request ----------------------------------------------------------
+
 
 def test_request_matches_the_claude_enricher_spec():
     enricher = _enricher(fake := _FakeClient())
@@ -132,6 +134,7 @@ def test_concurrent_results_keep_input_order():
 
 
 # --- failures -------------------------------------------------------------
+
 
 @pytest.mark.parametrize(
     "response",

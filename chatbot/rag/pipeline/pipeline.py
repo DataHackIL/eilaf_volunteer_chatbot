@@ -110,7 +110,7 @@ class RAGPipeline:
     @classmethod
     def from_static_dir(
         cls, static_dir: str | Path = DEFAULT_STATIC_DIR, **kwargs
-    ) -> "RAGPipeline":
+    ) -> RAGPipeline:
         """Build a pipeline from files on disk using the pretrained embedder.
 
         Retrieves the nearest-neighbour passages to the query and echoes them.

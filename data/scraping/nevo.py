@@ -37,8 +37,7 @@ def _attach_subclause(marker, text, heading, anchor, path):
     becomes a sibling of the deepest level of its own kind, else nests one deeper.
     """
     kind = _kind(marker)
-    depth = next((i for i in range(len(path) - 1, -1, -1)
-                  if path[i][0] == kind), None)
+    depth = next((i for i in range(len(path) - 1, -1, -1) if path[i][0] == kind), None)
     path = path if depth is None else path[:depth]
     parent = path[-1][1] if path else anchor
     node = {"marker": marker, "heading": heading, "text": text, "children": []}
@@ -63,18 +62,18 @@ def _clause_ref(marker: str) -> str:
 def _add_sources(tree: dict, url: str) -> None:
     """Give every node a ``source`` citing the law and where in it the node sits.
 
-    A clause is cited by its section number followed by each enclosing
-    sub-clause marker, e.g. "חוק זכויות נפגעי עבירה, תשס"א-2001, סעיף 6(א)(1)".
-    Schedules number items, not sections, so an item in a תוספת is cited as
-    "<law>, תוספת שניה, פרט 3". A chapter cites the law and its own title (the
-    reference the loader falls back to for a chunk spanning several of its
-    sections); text outside any section cites its chapter, or the law alone, as
-does the root.
-    Nevo pages have no per-section anchors, so the link is the law's page.
+        A clause is cited by its section number followed by each enclosing
+        sub-clause marker, e.g. "חוק זכויות נפגעי עבירה, תשס"א-2001, סעיף 6(א)(1)".
+        Schedules number items, not sections, so an item in a תוספת is cited as
+        "<law>, תוספת שניה, פרט 3". A chapter cites the law and its own title (the
+        reference the loader falls back to for a chunk spanning several of its
+        sections); text outside any section cites its chapter, or the law alone, as
+    does the root.
+        Nevo pages have no per-section anchors, so the link is the law's page.
 
-    The parser also yields pseudo-chapters inside schedules — "(בוטלה)", the
-    "(סעיף 7(3) ו-(4))" authority line — so a schedule stays open until the next
-    title that starts a real chapter or schedule.
+        The parser also yields pseudo-chapters inside schedules — "(בוטלה)", the
+        "(סעיף 7(3) ו-(4))" authority line — so a schedule stays open until the next
+        title that starts a real chapter or schedule.
     """
     law = tree.get("title", "")
     schedule = None
@@ -100,7 +99,12 @@ does the root.
             schedule = None
         place = schedule or title
         node["source"] = cite(place)
-        walk(node.get("children", []), "", place if schedule else "", "פרט" if schedule else "סעיף")
+        walk(
+            node.get("children", []),
+            "",
+            place if schedule else "",
+            "פרט" if schedule else "סעיף",
+        )
 
 
 class NevoScraper(BaseHTMLScraper):
@@ -159,18 +163,21 @@ class NevoModernScraper(NevoScraper):
         content_el = title_el.parent
         root = {"title": title_el.get_text(strip=True), "children": []}
 
-        chapter = None       # current <h3> node, or None before the first one
-        heading = ""         # pending <h6> marginal heading for the next unit
-        section = None       # current top-level section node
-        anchor = root        # node a depth-1 sub-clause attaches under
-        path = []            # stack of (kind, node) for the open sub-clause levels
+        chapter = None  # current <h3> node, or None before the first one
+        heading = ""  # pending <h6> marginal heading for the next unit
+        section = None  # current top-level section node
+        anchor = root  # node a depth-1 sub-clause attaches under
+        path = []  # stack of (kind, node) for the open sub-clause levels
 
         for el in content_el.children:
             if not isinstance(el, Tag):
                 continue
             if el.name == "h3":
-                chapter = {"type": "chapter", "title": el.get_text(strip=True),
-                           "children": []}
+                chapter = {
+                    "type": "chapter",
+                    "title": el.get_text(strip=True),
+                    "children": [],
+                }
                 root["children"].append(chapter)
                 section, anchor, path = None, chapter, []
             elif el.name == "h6":
@@ -185,11 +192,16 @@ class NevoModernScraper(NevoScraper):
                     # e.g. "9. (א)"; split it so the (א) level is explicit and
                     # later subsections nest as its siblings rather than deeper.
                     m = _SECTION_RE.match(marker)
-                    section = {"type": "section", "marker": m.group().strip(),
-                               "heading": heading, "text": "", "children": []}
+                    section = {
+                        "type": "section",
+                        "marker": m.group().strip(),
+                        "heading": heading,
+                        "text": "",
+                        "children": [],
+                    }
                     (chapter or root)["children"].append(section)
                     anchor, path, heading = section, [], ""
-                    rest = marker[m.end():].strip()
+                    rest = marker[m.end() :].strip()
                     if _kind(rest) in ("letter", "digit"):
                         path, _ = _attach_subclause(rest, text, "", section, [])
                     else:
@@ -197,8 +209,12 @@ class NevoModernScraper(NevoScraper):
                 elif kind == "other":
                     # definition / continuation: child of the current section,
                     # and a fresh anchor for any sub-clauses it introduces.
-                    node = {"marker": marker, "heading": heading, "text": text,
-                            "children": []}
+                    node = {
+                        "marker": marker,
+                        "heading": heading,
+                        "text": text,
+                        "children": [],
+                    }
                     (section or chapter or root)["children"].append(node)
                     anchor, path, heading = node, [], ""
                 else:
@@ -211,15 +227,18 @@ class NevoModernScraper(NevoScraper):
 # lines plus the change-description keywords that introduce/precede old text.
 _NOTE_RE = re.compile(
     r'^(מיום|עד יום|תיקון מס|ס"ח|ה"ח|ק"ת|פ"ח|דיני מדינה|י"פ|הודעה'
-    r"|הוספת|החלפת|מחיקת|ביטול|השמטת|החלת|הוראת שעה|תחילה|הנוסח הקודם)")
+    r"|הוספת|החלפת|מחיקת|ביטול|השמטת|החלת|הוראת שעה|תחילה|הנוסח הקודם)"
+)
 
 
 def _colors(p: Tag) -> set:
     """Set of CSS text colours used inside a paragraph's spans."""
-    return {m.group(1)
-            for s in p.find_all("span")
-            for m in [re.search(r"color:\s*([a-z]+)", s.get("style", ""))]
-            if m}
+    return {
+        m.group(1)
+        for s in p.find_all("span")
+        for m in [re.search(r"color:\s*([a-z]+)", s.get("style", ""))]
+        if m
+    }
 
 
 def _split_section(text: str):
@@ -228,10 +247,10 @@ def _split_section(text: str):
     e.g. '3. (א) כל תושב…' → ('3.', '(א)', 'כל תושב…').
     """
     m = _SECTION_RE.match(text)
-    num, rest = m.group().strip(), text[m.end():]
+    num, rest = m.group().strip(), text[m.end() :]
     sub = _SUB_RE.match(rest)
     if sub:
-        return num, sub.group(1), rest[sub.end():].strip()
+        return num, sub.group(1), rest[sub.end() :].strip()
     return num, None, rest.strip()
 
 
@@ -250,8 +269,11 @@ class NevoLegacyScraper(NevoScraper):
         root = {"title": soup.title.get_text(strip=True), "children": []}
 
         ps = soup.find_all("p")
-        body_start = next(i for i, p in enumerate(ps)
-                          if p.get("class") and "medium2-header" in p["class"])
+        body_start = next(
+            i
+            for i, p in enumerate(ps)
+            if p.get("class") and "medium2-header" in p["class"]
+        )
 
         chapter = None
         section = None
@@ -282,14 +304,21 @@ class NevoLegacyScraper(NevoScraper):
                 heading = text
                 continue
             # Citation / change-description lines are legislative history.
-            if _NOTE_RE.match(text) or ("red" in col and text.startswith(("מיום", "עד יום"))):
+            if _NOTE_RE.match(text) or (
+                "red" in col and text.startswith(("מיום", "עד יום"))
+            ):
                 notes_target.setdefault("notes", []).append(text)
                 continue
 
             if sec_m:
                 num, sub, body = _split_section(text)
-                section = {"type": "section", "marker": num, "heading": heading,
-                           "text": "", "children": []}
+                section = {
+                    "type": "section",
+                    "marker": num,
+                    "heading": heading,
+                    "text": "",
+                    "children": [],
+                }
                 (chapter or root)["children"].append(section)
                 anchor, path, heading = section, [], ""
                 if sub:
@@ -299,7 +328,7 @@ class NevoLegacyScraper(NevoScraper):
                     notes_target = section
             elif _SUB_RE.match(text):
                 marker = _SUB_RE.match(text).group(1)
-                body = text[_SUB_RE.match(text).end():].strip()
+                body = text[_SUB_RE.match(text).end() :].strip()
                 path, notes_target = _attach_subclause(marker, body, "", anchor, path)
             else:
                 # marker-less body line: a definition or a continuation.

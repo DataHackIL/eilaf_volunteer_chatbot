@@ -29,7 +29,7 @@ import os
 
 # Same unit, shared deliberately: the model tier and output cap stay a one-line
 # change in claude_api.py rather than drifting between the two Claude heads.
-from chatbot.rag.generator.claude_api import MODEL, _MAX_TOKENS, ClaudeGenerator
+from chatbot.rag.generator.claude_api import _MAX_TOKENS, MODEL, ClaudeGenerator
 
 REGION_ENV = "EILAF_BEDROCK_REGION"
 MODEL_ENV = "EILAF_BEDROCK_MODEL"

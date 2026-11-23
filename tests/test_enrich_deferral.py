@@ -54,7 +54,9 @@ def test_failed_segment_is_retried_on_the_next_run():
     enriched, *_ = annotate_tree(tree(), first)
 
     second = StubEnricher(SegmentAnnotation(track="hostile_acts"))
-    out, pending, sent, annotated = annotate_tree(tree(), second, existing_tree=enriched)
+    out, pending, sent, annotated = annotate_tree(
+        tree(), second, existing_tree=enriched
+    )
 
     # Only the previously-failed segment is re-sent; the successful one is reused.
     assert second.seen == ["another segment long enough to pass the rule"]
@@ -96,11 +98,15 @@ def test_ok_is_not_part_of_any_backend_schema():
 
 # --- checkpointing ---------------------------------------------------------
 
+
 def big_tree(n: int) -> dict:
     return {
         "title": "T",
         "children": [
-            {"heading": f"H{i}", "text": f"segment number {i} long enough to pass the rule"}
+            {
+                "heading": f"H{i}",
+                "text": f"segment number {i} long enough to pass the rule",
+            }
             for i in range(n)
         ],
     }
@@ -132,7 +138,10 @@ def test_checkpoint_keeps_earlier_chunks_when_a_later_one_crashes():
     saved: list[dict] = []
     with pytest.raises(RuntimeError):
         annotate_tree(
-            big_tree(4), enricher, chunk_size=2, on_chunk=lambda t: saved.append(copy.deepcopy(t))
+            big_tree(4),
+            enricher,
+            chunk_size=2,
+            on_chunk=lambda t: saved.append(copy.deepcopy(t)),
         )
 
     (last,) = saved
@@ -148,7 +157,11 @@ def test_checkpoint_respects_the_budget_and_sends_each_segment_once():
     enricher = StubEnricher(*[SegmentAnnotation(ok=False) for _ in range(3)])
     calls: list[int] = []
     _, pending, sent, annotated = annotate_tree(
-        big_tree(5), enricher, max_new=3, chunk_size=2, on_chunk=lambda t: calls.append(1)
+        big_tree(5),
+        enricher,
+        max_new=3,
+        chunk_size=2,
+        on_chunk=lambda t: calls.append(1),
     )
     assert (pending, sent, annotated) == (5, 3, 0)
     assert len(enricher.seen) == len(set(enricher.seen)) == 3

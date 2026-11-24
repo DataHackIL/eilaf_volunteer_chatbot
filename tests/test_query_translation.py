@@ -191,3 +191,14 @@ def test_fuse_sums_reciprocal_ranks():
     # 1 is second in one list and first in the other, so it beats 3.
     assert list(fused[:2]) == [1, 3]
     assert set(fused) == {0, 1, 2, 3}
+
+
+def test_hebrew_query_reports_what_was_searched():
+    translator = _FakeTranslator({"beta": "alpha"})
+    pipe = _pipeline(translator)
+    assert pipe.hebrew_query("beta", "Hebrew") is None
+    pipe.matches("beta", context=None, language="Arabic")
+    assert pipe.hebrew_query("beta", "Arabic") == "alpha"
+    assert translator.calls == [("beta", "Arabic")]  # served from the cache
+    assert _pipeline(None).hebrew_query("beta", "Arabic") is None
+    assert _pipeline(_FakeTranslator(fail=True)).hebrew_query("beta", "Arabic") is None

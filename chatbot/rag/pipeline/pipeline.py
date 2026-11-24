@@ -350,6 +350,17 @@ class RAGPipeline:
         ordered = sorted(scores, key=scores.__getitem__, reverse=True)
         return np.array(ordered, dtype=np.int64)
 
+    def hebrew_query(self, query: str, language: str | None) -> str | None:
+        """The Hebrew text retrieval runs on for ``query``, or None if it runs on
+        ``query`` as written (Hebrew input, no translator, or a failed translation).
+
+        Shares the translation cache, so calling it around ``retrieve`` costs no
+        extra translation. For front-ends that show what was searched.
+        """
+        if self.translator is None or is_hebrew(language):
+            return None
+        return self._translate(query, language)
+
     def _translate(self, text: str, language: str) -> str | None:
         """``text`` in Hebrew, or None when the translator fails or returns nothing.
 

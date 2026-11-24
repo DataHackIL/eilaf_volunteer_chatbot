@@ -38,6 +38,7 @@ data/static/**/*.docx
 data/static/**/*.pdf
 data/static/**/*.txt
 data/static/**/*.json
+data/static/**/*.xlsx
 
 # Cached corpus embeddings (regenerated on demand)
 data/static/**/.embeddings/

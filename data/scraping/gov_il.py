@@ -26,7 +26,7 @@ from urllib.parse import parse_qs, urlsplit
 import requests
 from bs4 import BeautifulSoup, Tag
 
-from data.scraping.base import BaseHTMLScraper, cite
+from data.scraping.base import BaseHTMLScraper, cite, fold_barren_headings
 
 CONTENT_API = (
     "https://openapi-gc.digital.gov.il/pub/cio/govil/rest/contentpage/v1"
@@ -121,25 +121,6 @@ def _heading_of(el: Tag) -> tuple[str, int] | None:
     return (text, _PSEUDO_LEVEL) if bold == " ".join(text.split()) else None
 
 
-def _fold_barren_headings(node: dict) -> None:
-    """Turn headings that introduce nothing back into their parent's text.
-
-    gov.il editors sometimes mark a plain sentence as an ``<h4>`` for emphasis.
-    Left as a heading it would carry its own prose *as a heading* over an empty
-    body, and the loader — which only emits text-bearing nodes — would drop it
-    entirely. Folding bottom-up, so a heading whose children all fold is
-    reconsidered once it has absorbed them.
-    """
-    kept = []
-    for child in node.get("children", []):
-        _fold_barren_headings(child)
-        if child["text"] or child["children"]:
-            kept.append(child)
-        elif child["heading"]:
-            node["text"] = f'{node["text"]}\n{child["heading"]}'.strip()
-    node["children"] = kept
-
-
 def _first_title(section: dict | None, key: str) -> str:
     """Title of the first entry under ``section[key]`` (a gov.il metadata list)."""
     entries = (section or {}).get(key) or []
@@ -232,7 +213,7 @@ class GovILScraper(BaseHTMLScraper):
             heading = nav[index].get("title", "").strip() if index < len(nav) else ""
             chapter = {"heading": heading, "level": 2, "text": "", "children": []}
             self._fill_chapter(chapter, payload.get("contentMain") or {})
-            _fold_barren_headings(chapter)
+            fold_barren_headings(chapter)
             if chapter["text"] or chapter["children"]:
                 index_param = (
                     parse_qs(urlsplit(nav[index].get("url", "")).query).get("chapterIndex")
@@ -360,6 +341,22 @@ def list_pages(landing_url: str, tab: str = PAGES_TAB) -> list[str]:
 _GENERAL = (
     "nifgaey-avera",            # rights, criminal-process stages, support services
     "guide-victims-of-killing",  # the סנ"ה programme for families of killing victims
+    "qa-015",                    # first steps after being harmed
+    "qa-014",                    # victims of physical violence
+    "qa_05",                     # close relative killed by an offence
+    "rights_victims_of_crimes",  # rights during the criminal process
+    "mena",                      # the מנ"ע case-tracking system
+    "molsa-118",                 # the 118 welfare information hotline
+    "yated-inbar-mental-treatment-centers",  # mental-health centres for ages 18-25
+    "social-worker-at-police-stations",
+    "about-witness-protection-authority",
+)
+
+# Same as _GENERAL, for pages outside /he/pages/: full URLs, since the path form
+# and the culture are both part of what identifies them.
+_GENERAL_URLS = (
+    "https://www.gov.il/he/service/victims-of-crime-application",
+    "https://www.gov.il/ar/pages/guide-victims-of-killing",
 )
 
 # Pages whose entitlements run through the Ministry of Defence / National
@@ -385,5 +382,7 @@ if __name__ == "__main__":
     #       GovILScraper(url)()
     for slug in _GENERAL:
         GovILScraper(f"https://www.gov.il/he/pages/{slug}")()
+    for url in _GENERAL_URLS:
+        GovILScraper(url)()
     for slug in _HOSTILE_ACTS:
         GovILScraper(f"https://www.gov.il/he/pages/{slug}", track="hostile_acts")()

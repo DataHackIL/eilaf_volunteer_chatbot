@@ -80,6 +80,20 @@ ENGINE_KEYS: dict[str, tuple[str, ...]] = {
 }
 GENERATOR = os.environ.get("EILAF_GENERATOR", "").strip().lower() or "gemini"
 
+# --- query translation -------------------------------------------------------
+# The corpus is Hebrew, so a question in Arabic or English is also retrieved in
+# Hebrew translation and the two rankings are fused (see RAGPipeline). Blank
+# leaves translation off. Built in ``pipeline_singleton``:
+#   nllb  local NLLB-200 on CTranslate2; MODEL is the converted model directory
+#   opus  local Helsinki-NLP opus-mt; MODEL optionally overrides the Arabic model
+#   llm   a chat model behind an OpenAI-compatible URL (a local Ollama or
+#         llama-server, or a hosted one); MODEL is the model name
+TRANSLATORS = ("nllb", "opus", "llm")
+TRANSLATOR = os.environ.get("EILAF_TRANSLATOR", "").strip().lower()
+TRANSLATOR_MODEL = os.environ.get("EILAF_TRANSLATOR_MODEL", "").strip()
+TRANSLATOR_URL = os.environ.get("EILAF_TRANSLATOR_URL", "").strip()
+TRANSLATOR_API_KEY = os.environ.get("EILAF_TRANSLATOR_API_KEY", "")
+
 # --- reported conversations --------------------------------------------------
 # Where a conversation goes once the user has read the consent message and
 # tapped Approve. With a bucket set we write to S3; without one, to a local
@@ -148,6 +162,35 @@ def corpus_files() -> list[Path]:
     ]
 
 
+def _translator_problems() -> list[str]:
+    """What stops the configured query translator from loading, if anything."""
+    if not TRANSLATOR:
+        return []
+    if TRANSLATOR not in TRANSLATORS:
+        return [
+            f"EILAF_TRANSLATOR={TRANSLATOR!r} is not a translator — use one of "
+            + ", ".join(TRANSLATORS)
+            + ", or leave it blank"
+        ]
+    if TRANSLATOR == "nllb":
+        if not TRANSLATOR_MODEL:
+            return [
+                "EILAF_TRANSLATOR_MODEL is not set, and EILAF_TRANSLATOR=nllb — "
+                "point it at the converted CTranslate2 model directory"
+            ]
+        if not Path(TRANSLATOR_MODEL).is_dir():
+            return [
+                f"EILAF_TRANSLATOR_MODEL={TRANSLATOR_MODEL!r} is not a directory "
+                "(EILAF_TRANSLATOR=nllb needs the converted model on disk)"
+            ]
+    if TRANSLATOR == "llm" and not (TRANSLATOR_URL and TRANSLATOR_MODEL):
+        return [
+            "EILAF_TRANSLATOR=llm needs both EILAF_TRANSLATOR_URL and "
+            "EILAF_TRANSLATOR_MODEL"
+        ]
+    return []
+
+
 def wiring_problems() -> list[str]:
     """Everything that stops the bot from answering, each with its fix.
 
@@ -176,6 +219,7 @@ def wiring_problems() -> list[str]:
                 f"{keys[0]} is not set, and the answer engine is {GENERATOR!r} "
                 "(EILAF_GENERATOR) — set the key, or pick another engine"
             )
+    problems.extend(_translator_problems())
     if IS_PROD:
         # ``server._verify_signature`` skips the App-Secret HMAC when the secret
         # is empty: convenient offline, an *open webhook* on a public host —

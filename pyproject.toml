@@ -19,6 +19,12 @@ dependencies = [
     # rag
     "numpy",
     "sentence-transformers",
+    # Query translation (chatbot/rag/translator): NLLB runs on CTranslate2, the
+    # translator the bot is expected to serve with. Base, not an extra, because
+    # the webhook server loads it when EILAF_TRANSLATOR=nllb. A ~40 MB wheel
+    # with no further dependencies (the heavy part of the `stt` extra is
+    # onnxruntime, not this).
+    "ctranslate2",
     # enrichment / LLM. Both halves ship: data/enrich/* drives the boot-time
     # curation pass, chatbot/rag/generator/* is the live answer head. pydantic
     # for the structured-output schema; dotenv loads the keys from a local .env.
@@ -47,6 +53,9 @@ dependencies = [
 # The transcription/ unit, which merges in on its own branch (see the packages
 # note below — `find` tolerates it being absent).
 stt = ["faster-whisper"]
+# Only for scripts/translation_bench.py's opus-mt baseline: Marian's tokenizer
+# needs sentencepiece. The server's translators (nllb, llm) do not.
+translate-bench = ["sentencepiece"]
 
 [build-system]
 requires = ["setuptools>=68"]

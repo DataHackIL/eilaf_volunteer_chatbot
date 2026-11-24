@@ -755,7 +755,10 @@ def _run_pipeline(session: Session) -> list[Reply]:
     t = TEXTS[session.language]
     pipeline = get_pipeline()
     contexts = pipeline.retrieve(
-        session.query, session.facts or None, context=session.context
+        session.query,
+        session.facts or None,
+        context=session.context,
+        language=session.language.prompt_name,
     )
     # Retrieval already succeeded; a generator key/quota error still lets us show
     # the sources.

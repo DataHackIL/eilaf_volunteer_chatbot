@@ -20,6 +20,7 @@ def wired(monkeypatch, tmp_path):
     monkeypatch.setattr(config, "IS_PROD", False)
     monkeypatch.setattr(config, "corpus_files", lambda: [Path("doc.json")])
     monkeypatch.setattr(config, "ENV_FILE", tmp_path / ".env")
+    monkeypatch.setattr(config, "TRANSLATOR", "")
     (tmp_path / ".env").touch()
 
 
@@ -112,3 +113,38 @@ def test_the_server_refuses_to_boot_and_lists_everything(wired, monkeypatch):
     assert "WHATSAPP_VERIFY_TOKEN" in str(raised.value)
     assert "corpus is empty" in str(raised.value)
     assert not loaded  # failed before the slow model load
+
+
+def test_no_translator_is_fine_and_builds_nothing(wired):
+    assert config.wiring_problems() == []
+    assert pipeline_singleton.build_translator() is None
+
+
+def test_an_unknown_translator_lists_the_real_ones(wired, monkeypatch):
+    monkeypatch.setattr(config, "TRANSLATOR", "google")
+    (problem,) = config.wiring_problems()
+    assert "EILAF_TRANSLATOR='google'" in problem
+    assert all(name in problem for name in config.TRANSLATORS)
+
+
+def test_nllb_needs_an_existing_model_directory(wired, monkeypatch, tmp_path):
+    monkeypatch.setattr(config, "TRANSLATOR", "nllb")
+    monkeypatch.setattr(config, "TRANSLATOR_MODEL", "")
+    assert "EILAF_TRANSLATOR_MODEL is not set" in config.wiring_problems()[0]
+    monkeypatch.setattr(config, "TRANSLATOR_MODEL", str(tmp_path / "absent"))
+    assert "is not a directory" in config.wiring_problems()[0]
+    monkeypatch.setattr(config, "TRANSLATOR_MODEL", str(tmp_path))
+    assert config.wiring_problems() == []
+
+
+def test_llm_translator_needs_url_and_model(wired, monkeypatch):
+    monkeypatch.setattr(config, "TRANSLATOR", "llm")
+    monkeypatch.setattr(config, "TRANSLATOR_URL", "http://localhost:11434/v1")
+    monkeypatch.setattr(config, "TRANSLATOR_MODEL", "")
+    assert (
+        "EILAF_TRANSLATOR_URL and EILAF_TRANSLATOR_MODEL" in config.wiring_problems()[0]
+    )
+    monkeypatch.setattr(config, "TRANSLATOR_MODEL", "gemma3:4b")
+    assert config.wiring_problems() == []
+    translator = pipeline_singleton.build_translator()
+    assert translator.name == "glossary+llm[gemma3:4b]"

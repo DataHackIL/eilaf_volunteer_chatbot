@@ -58,3 +58,6 @@ data/costs/
 
 # Local compose overrides (per-machine dev tweaks, never shared)
 docker-compose.override.yml
+
+# IAM migration bundles (scripts/iam_migrate.py) name the account id and its ARNs; the repo is public.
+iam-export*.json

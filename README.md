@@ -75,6 +75,9 @@ run with; edit that list to add sources.
 python -m data.scraping.nevo         # Israeli law texts (modern + legacy templates)
 python -m data.scraping.kol_zchut    # KolZchut rights pages, via the MediaWiki API
 python -m data.scraping.gov_il       # gov.il guides and information pages, via its content API
+python -m data.scraping.btl          # National Insurance benefit lobbies, with their sub-pages
+python -m data.scraping.health_gov   # Ministry of Health (me.health.gov.il) information pages
+python -m data.scraping.pdf_source   # published PDFs (gov.il) → the same section-tree JSON
 python -m data.scraping.docx_source  # local .docx drafts → the same section-tree JSON
 ```
 
@@ -93,8 +96,10 @@ running.
 > landing page.
 
 > **Time:** one HTTP request per page, so this is fast — measured **0.4–1.2 s
-> per page** (the largest legacy nevo law is the slow end), i.e. a few seconds
-> for the whole current source list. Adding many pages scales linearly.
+> per page** (the largest legacy nevo law is the slow end). The whole current
+> source list takes about **3 minutes**, most of it `btl`: each benefit lobby
+> is crawled with all its sub-pages (~100 pages, paced 0.5 s apart). Adding
+> many pages scales linearly.
 
 ### 2. Enrich
 
@@ -180,7 +185,7 @@ variables tune it:
 | Variable | Default | What it does |
 | --- | --- | --- |
 | `CURATE_SKIP_SCRAPE` / `_ENRICH` / `_EMBED` | `0` | `1` skips that one stage |
-| `CURATE_SCRAPERS` | `nevo kol_zchut gov_il` | which `data.scraping` modules to run (`docx_source` is out: it globs a private local folder) |
+| `CURATE_SCRAPERS` | `nevo kol_zchut gov_il btl health_gov pdf_source` | which `data.scraping` modules to run (`docx_source` is out: it globs a private local folder) |
 | `ENRICH_PROVIDER` | `gemini` | `claude` / `gemini` / `cerebras` |
 | `ENRICH_LIMIT` | *(unset)* | cap segments sent to the LLM this run; unset means the whole pending backlog, which can take hours |
 | `ENRICH_ARGS` | *(unset)* | extra flags for `python -m data.enrich`, e.g. `--no-llm` |

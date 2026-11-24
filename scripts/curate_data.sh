@@ -15,8 +15,9 @@
 #   CURATE_SKIP_ENRICH=1
 #   CURATE_SKIP_EMBED=1
 #   CURATE_SCRAPERS="..."  space-separated data.scraping modules to run
-#                          (default: nevo kol_zchut gov_il — docx_source is
-#                          excluded because it globs a private local folder)
+#                          (default: nevo kol_zchut gov_il btl health_gov
+#                          pdf_source — docx_source is excluded because it
+#                          globs a private local folder)
 #   ENRICH_PROVIDER=...    claude | gemini | cerebras (default: gemini, the
 #                          working free back-end)
 #   ENRICH_LIMIT=N         cap the number of segments sent to the LLM this run;
@@ -38,7 +39,7 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
 
 PYTHON="${PYTHON:-python}"
-CURATE_SCRAPERS="${CURATE_SCRAPERS:-nevo kol_zchut gov_il}"
+CURATE_SCRAPERS="${CURATE_SCRAPERS:-nevo kol_zchut gov_il btl health_gov pdf_source}"
 ENRICH_PROVIDER="${ENRICH_PROVIDER:-gemini}"
 FAILED=()
 

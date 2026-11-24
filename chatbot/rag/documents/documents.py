@@ -198,8 +198,17 @@ def _node_meta(node: dict, parent_meta: dict) -> dict:
     Hebrew prose and stores them under ``node["meta"]``; here they override the
     inherited parent tags. Un-enriched nodes carry no ``meta`` and simply inherit
     the parent's — so the loader still works on a raw (un-enriched) tree.
+
+    A scraper may also stamp ``track`` straight on a node, as on the root (see
+    :func:`_root_meta`), when one page of a source is on a different track from
+    the rest: a hostile-acts page inside a general benefit's lobby. It is kept
+    apart from ``meta`` because enrichment rewrites ``meta`` wholesale, and it
+    still yields to a per-segment value the enricher finds.
     """
     meta = dict(parent_meta)
+    track = (node.get("track") or "").strip()
+    if track:
+        meta["track"] = track
     node_meta = node.get("meta")
     if isinstance(node_meta, dict):
         meta.update({key: value for key, value in node_meta.items() if value is not None})
@@ -228,6 +237,25 @@ def _covering_citations(cover: list | None, parts: list[dict]) -> list[dict]:
     return citations
 
 
+def _uniform_meta(node: dict, node_meta: dict) -> bool:
+    """Whether every text-bearing node under ``node`` has ``node_meta``'s tags.
+
+    The rollup emits a collapsed subtree under its root's metadata alone, so
+    collapsing one whose parts disagree — a hostile-acts page among general
+    ones, a clause the enricher tagged for an age group — would silently drop
+    the parts' tags. Such a subtree is walked node by node instead, keeping the
+    granularity exactly where eligibility differs.
+    """
+    for child in node.get("children", []):
+        child_meta = _node_meta(child, node_meta)
+        if child.get("useful", True) and (child.get("text") or "").strip():
+            if child_meta != node_meta:
+                return False
+        if not _uniform_meta(child, child_meta):
+            return False
+    return True
+
+
 def _flatten_json_tree(
     data: dict, source: str, merge_chars: int = 0, max_chars: int = 0
 ) -> list[Document]:
@@ -248,8 +276,10 @@ def _flatten_json_tree(
     id/crumb — instead of one Document per clause. Larger subtrees recurse as
     before, so genuinely long sections stay split. ``merge_chars=0`` disables the
     rollup: every text-bearing node becomes its own Document (the finer-grained
-    substrate the id/parent tests pin). A collapsed subtree carries only its root
-    node's metadata, so keep ``merge_chars`` near the embedder's context window.
+    substrate the id/parent tests pin). A collapsed subtree carries its root
+    node's metadata, so a subtree whose parts carry different tags is never
+    collapsed (see :func:`_uniform_meta`), and leaves are only packed with
+    siblings sharing their tags.
 
     A node's ``source`` citations follow its text, and every split piece repeats
     its node's. A chunk spanning several nodes — a rolled-up subtree, a packed run
@@ -350,15 +380,19 @@ def _flatten_json_tree(
         # Buffer of adjacent leaf clauses awaiting bin-packing (see below). Only
         # siblings under *this* parent are ever packed together, so packing never
         # crosses a section boundary; ``pack_id`` is the first buffered leaf's id.
+        # Only leaves with the same metadata share a pack, and the pack carries
+        # it: a leaf on its own track packed under its parent's tags would read
+        # as general-audience content.
         pack: list[str] = []
         pack_citations: list[dict] = []
         pack_id: str | None = None
+        pack_meta: dict = meta
 
         def flush() -> None:
             nonlocal pack_id
             if pack:
                 emit(
-                    "\n".join(pack), crumbs, meta, pack_id, parent_id,
+                    "\n".join(pack), crumbs, pack_meta, pack_id, parent_id,
                     _covering_citations(parent_source, pack_citations),
                 )
                 pack.clear()
@@ -370,17 +404,25 @@ def _flatten_json_tree(
             child_crumbs = crumbs + [label(node)]
             node_meta = _node_meta(node, meta)
             merged = "\n".join(subtree_text(node, is_root=True))
-            small = merge_chars and 0 < len(merged) <= merge_chars
+            small = (
+                merge_chars
+                and 0 < len(merged) <= merge_chars
+                and _uniform_meta(node, node_meta)
+            )
             if small and not node.get("children"):
                 # A small *leaf* clause: bin-pack it with adjacent leaf siblings
                 # into one Document of up to ``merge_chars`` — this is what
                 # actually collapses the schedules' long flat enumerations. Keep
                 # the clause's own marker inline (its crumb is the shared parent).
                 unit = "\n".join(subtree_text(node, is_root=False))
-                if pack and sum(len(t) for t in pack) + len(unit) > merge_chars:
+                if pack and (
+                    sum(len(t) for t in pack) + len(unit) > merge_chars
+                    or node_meta != pack_meta
+                ):
                     flush()
                 if pack_id is None:
                     pack_id = node_id(path)
+                    pack_meta = node_meta
                 pack.append(unit)
                 _add_citations(pack_citations, subtree_citations(node))
                 continue

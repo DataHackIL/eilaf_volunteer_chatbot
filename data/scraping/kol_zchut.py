@@ -168,3 +168,6 @@ if __name__ == "__main__":
     # Example usage: a (זכות) rights page and a (חוק) law/portal page.
     KolZchutScraper("https://www.kolzchut.org.il/he/%D7%93%D7%9E%D7%99_%D7%90%D7%91%D7%98%D7%9C%D7%94")()
     KolZchutScraper("https://www.kolzchut.org.il/he/%D7%97%D7%95%D7%A7_%D7%94%D7%91%D7%99%D7%98%D7%95%D7%97_%D7%94%D7%9C%D7%90%D7%95%D7%9E%D7%99")()
+    # Mental-health portal page and the ELI child-protection organisation page.
+    KolZchutScraper("https://www.kolzchut.org.il/he/%D7%9E%D7%AA%D7%9E%D7%95%D7%93%D7%93%D7%99_%D7%A0%D7%A4%D7%A9")()
+    KolZchutScraper("https://www.kolzchut.org.il/he/%D7%90%D7%9C%22%D7%99_-_%D7%94%D7%90%D7%92%D7%95%D7%93%D7%94_%D7%9C%D7%94%D7%92%D7%A0%D7%AA_%D7%94%D7%99%D7%9C%D7%93")()

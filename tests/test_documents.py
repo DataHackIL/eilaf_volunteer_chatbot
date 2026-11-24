@@ -102,3 +102,44 @@ def test_large_subtree_still_recurses(tree):
     docs = _flatten_json_tree(tree, source="src.json", merge_chars=5)
     by_id = {d.id: d for d in docs}
     assert {"src.json#0", "src.json#0/0", "src.json#0/1", "src.json#1/0"} <= set(by_id)
+
+
+def test_rollup_never_merges_across_differing_tracks():
+    """A small tagged page among untagged siblings keeps its track at merge size.
+
+    Leaf packing used to emit a pack under the *parent's* tags, and a collapsed
+    subtree under its root's alone — so a hostile-acts page rolled up with
+    general ones read as general-audience content.
+    """
+    tree = {
+        "title": "T",
+        "children": [
+            {"heading": "general A", "text": "general a body", "children": []},
+            {"heading": "hostile", "text": "hostile body", "track": "hostile_acts", "children": []},
+            {"heading": "general B", "text": "general b body", "children": []},
+            {
+                "heading": "mixed section",
+                "text": "section intro",
+                "children": [
+                    {"heading": "general C", "text": "general c body", "children": []},
+                    {"heading": "military", "text": "military body", "track": "military", "children": []},
+                ],
+            },
+        ],
+    }
+    docs = _flatten_json_tree(tree, source="src.json", merge_chars=500)
+
+    def track_of(body: str):
+        (doc,) = [d for d in docs if body in d.text]
+        return doc.meta.get("track")
+
+    assert track_of("hostile body") == "hostile_acts"
+    assert track_of("military body") == "military"
+    assert track_of("general a body") is None
+    assert track_of("general b body") is None
+    assert track_of("general c body") is None
+    # No chunk mixes tagged and untagged text.
+    for d in docs:
+        has_tagged = any(t in d.text for t in ("hostile body", "military body"))
+        has_general = any(t in d.text for t in ("general a body", "general b body", "general c body"))
+        assert not (has_tagged and has_general), d.text
